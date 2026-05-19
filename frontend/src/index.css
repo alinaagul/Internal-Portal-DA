@@ -1,0 +1,5 @@
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+input:focus { border-color: #3b82f6 !important; }
+button:hover:not(:disabled) { opacity: 0.88; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
