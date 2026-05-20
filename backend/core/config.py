@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # CORS
     FRONTEND_URL: str = "http://localhost:5173"
+    CORS_ORIGINS: str = ""          # optional comma-separated list
 
     @property
     def DATABASE_URL(self) -> str:
@@ -39,9 +40,11 @@ class Settings(BaseSettings):
             f"?driver={driver}&TrustServerCertificate=yes"
         )
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",          # ignore unknown .env keys
+    }
 
 
 @lru_cache()

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from core.config import settings
 from db.database import Base, engine, test_connection
-from models import user  # noqa: F401 — register model with Base metadata
+from model import user  
 from routers import auth
 
 
