@@ -11,10 +11,10 @@ export default function DocumentUpload({ onUpload, uploading, uploadProgress }) 
       alert("Only PDF files are supported.");
       return;
     }
-    if (file.size > 50 * 1024 * 1024) {
-      alert("File too large. Max 50MB.");
+    if (file.size > 200 * 1024 * 1024) {
+      alert("File too large. Max 200MB.");
       return;
-    }
+}
     setSelectedFile(file);
   };
 

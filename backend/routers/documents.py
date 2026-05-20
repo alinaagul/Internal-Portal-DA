@@ -28,7 +28,7 @@ UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 ALLOWED_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/tiff"}
-MAX_FILE_SIZE  = 50 * 1024 * 1024   # 50 MB
+MAX_FILE_SIZE  = 200 * 1024 * 1024
 
 
 # ── POST /documents/upload ────────────────────────────────────────────────────
