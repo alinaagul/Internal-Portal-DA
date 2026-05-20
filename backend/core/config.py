@@ -32,14 +32,17 @@ class Settings(BaseSettings):
 
     @property
     def DATABASE_URL(self) -> str:
-        """SQLAlchemy connection string for SQL Server via pyodbc."""
-        driver = self.DB_DRIVER.replace(" ", "+")
-        return (
-            f"mssql+pyodbc://{self.DB_USER}:{self.DB_PASSWORD}"
-            f"@{self.DB_SERVER}/{self.DATABASE}"
-            f"?driver={driver}&TrustServerCertificate=yes"
+        import urllib.parse
+        conn_str = (
+            f"DRIVER={{{self.DB_DRIVER}}};"
+            f"SERVER={self.DB_SERVER};"
+            f"DATABASE={self.DATABASE};"
+            f"UID={self.DB_USER};"
+            f"PWD={self.DB_PASSWORD};"
+            f"TrustServerCertificate=yes;"
+            f"Encrypt=no;"
         )
-
+        return "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(conn_str)
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
