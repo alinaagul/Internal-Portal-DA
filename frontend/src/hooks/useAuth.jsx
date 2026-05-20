@@ -1,7 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useContext, createContext } from "react";
 import { authApi } from "../api/auth";
 
-export function useAuth() {
+// ── Shared Auth Context ───────────────────────────────────────────────────────
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
       const stored = localStorage.getItem("user");
@@ -11,7 +14,7 @@ export function useAuth() {
     }
   });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError]     = useState(null);
 
   const saveSession = (data) => {
     localStorage.setItem("access_token", data.access_token);
@@ -57,5 +60,16 @@ export function useAuth() {
     setUser(null);
   }, []);
 
-  return { user, loading, error, login, signup, logout, setError };
+  return (
+    <AuthContext.Provider value={{ user, loading, error, login, signup, logout, setError }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
+  return ctx;
 }
