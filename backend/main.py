@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 
 from core.config import settings
 from db.database import Base, engine, test_connection
-from model import user       
-from model import document    
-from routers import auth
-from routers import documents
+from model import user      # noqa
+from model import document  # noqa
+from model import chat       # noqa  ← registers chat_sessions + chat_messages
+from routers import auth, documents
+from routers import chat as chat_router
 
 
 @asynccontextmanager
@@ -15,7 +16,6 @@ async def lifespan(app: FastAPI):
     print(f"\n{'='*50}")
     print(f"  {settings.APP_NAME} — Backend")
     print(f"{'='*50}")
-
     try:
         Base.metadata.create_all(bind=engine)
         print(f"[DB] Connected to {settings.DB_SERVER}/{settings.DATABASE} ✓")
@@ -32,8 +32,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version="0.2.0",
-    description="Document Assistant — Auth + OCR + RAG API",
+    version="0.3.0",
+    description="Document Assistant — Auth + OCR + RAG + Chat",
     lifespan=lifespan,
 )
 
@@ -45,13 +45,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router, prefix="/api/v1")
-app.include_router(documents.router, prefix="/api/v1")
+app.include_router(auth.router,        prefix="/api/v1")
+app.include_router(documents.router,   prefix="/api/v1")
+app.include_router(chat_router.router, prefix="/api/v1")
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "app": settings.APP_NAME, "version": "0.2.0"}
+    return {"status": "ok", "app": settings.APP_NAME, "version": "0.3.0"}
 
 
 if __name__ == "__main__":

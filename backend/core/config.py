@@ -51,10 +51,10 @@ class Settings(BaseSettings):
     # ── Ollama ────────────────────────────────────────────────────────────────
     OLLAMA_BASE_URL:       str = "http://localhost:11434"
     OLLAMA_EMBED_MODEL:    str = "mxbai-embed-large"       # embeddings
-    OLLAMA_CHAT_MODEL:     str = "mistral:7b-instruct"     # Q&A + summaries
+    OLLAMA_CHAT_MODEL:     str = "qwen2.5:7b"     # Q&A + summaries
     OLLAMA_CITATION_MODEL: str = "neural-chat"             # citation formatting
     # Legacy alias kept so existing code using OLLAMA_LLM_MODEL still works
-    OLLAMA_LLM_MODEL:      str = "mistral:7b-instruct"
+    OLLAMA_LLM_MODEL:      str = "qwen2.5:7b"
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     FRONTEND_URL: str = "http://localhost:5173"
