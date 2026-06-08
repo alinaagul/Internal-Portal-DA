@@ -9,12 +9,15 @@ export function useDocuments() {
   const [error, setError]           = useState(null);
   const pollingRefs = useRef({});   // track active polling intervals
 
+  // Normalize a document object so `id` is always set (list/status APIs use `document_id`)
+  const _normalize = (d) => ({ ...d, id: d.id ?? d.document_id });
+
   // Fetch all documents
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
     try {
       const { data } = await documentsApi.list();
-      setDocuments(data.documents || []);
+      setDocuments((data.documents || []).map(_normalize));
     } catch (err) {
       setError(err.response?.data?.detail || "Failed to load documents");
     } finally {
@@ -33,11 +36,13 @@ export function useDocuments() {
         setUploadProgress(pct);
       });
 
+      const normalized = _normalize(data);
+
       // Add to list immediately with "uploaded" status
-      setDocuments((prev) => [data, ...prev]);
+      setDocuments((prev) => [normalized, ...prev]);
 
       // Start polling for status updates
-      _startPolling(data.id);
+      _startPolling(normalized.id);
 
       return { success: true, document: data };
     } catch (err) {
@@ -69,8 +74,9 @@ export function useDocuments() {
     const interval = setInterval(async () => {
       try {
         const { data } = await documentsApi.getStatus(documentId);
+        const normalized = _normalize(data);
         setDocuments((prev) =>
-          prev.map((d) => (d.id === documentId ? { ...d, ...data } : d))
+          prev.map((d) => (d.id === documentId ? { ...d, ...normalized } : d))
         );
         if (data.status === "ready" || data.status === "failed") {
           _stopPolling(documentId);
