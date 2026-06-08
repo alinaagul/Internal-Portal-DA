@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.jsx";
 
 export default function AuthPage() {
-  const [mode, setMode] = useState("login"); // "login" | "signup"
+  const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ full_name: "", email: "", password: "" });
   const { login, signup, loading, error, setError } = useAuth();
   const navigate = useNavigate();
@@ -15,12 +15,10 @@ export default function AuthPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    let result;
-    if (mode === "login") {
-      result = await login(form.email, form.password);
-    } else {
-      result = await signup(form.full_name, form.email, form.password);
-    }
+    const result =
+      mode === "login"
+        ? await login(form.email, form.password)
+        : await signup(form.full_name, form.email, form.password);
     if (result.success) navigate("/dashboard");
   };
 
@@ -31,79 +29,55 @@ export default function AuthPage() {
   };
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        {/* Logo / brand */}
-        <div style={styles.brand}>
-          <div style={styles.logoRing}>
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-              <path d="M4 6h20M4 12h14M4 18h18M4 24h10" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round"/>
+    <div style={s.page}>
+      <div style={s.card}>
+        {/* Brand */}
+        <div style={s.brand}>
+          <div style={s.logoBox}>
+            <svg width="18" height="18" viewBox="0 0 28 28" fill="none">
+              <path d="M4 6h20M4 12h14M4 18h18M4 24h10" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round"/>
             </svg>
           </div>
-          <span style={styles.brandName}>DocAssist</span>
+          <span style={s.brandName}>DocAssist</span>
         </div>
 
-        <h1 style={styles.title}>
-          {mode === "login" ? "Welcome back" : "Create account"}
-        </h1>
-        <p style={styles.sub}>
-          {mode === "login"
-            ? "Sign in to your workspace"
-            : "Start your document intelligence journey"}
+        <h1 style={s.title}>{mode === "login" ? "Sign in" : "Create account"}</h1>
+        <p style={s.sub}>
+          {mode === "login" ? "Welcome back to your workspace" : "Start your document intelligence journey"}
         </p>
 
-        <form onSubmit={handleSubmit} style={styles.form}>
+        <form onSubmit={handleSubmit} style={s.form}>
           {mode === "signup" && (
-            <div style={styles.field}>
-              <label style={styles.label}>Full name</label>
-              <input
-                style={styles.input}
-                name="full_name"
-                type="text"
-                placeholder="Ahmed Khan"
-                value={form.full_name}
-                onChange={handleChange}
-                required
-              />
+            <div style={s.field}>
+              <label style={s.label}>Full name</label>
+              <input style={s.input} name="full_name" type="text"
+                placeholder="Ahmed Khan" value={form.full_name}
+                onChange={handleChange} required />
             </div>
           )}
-
-          <div style={styles.field}>
-            <label style={styles.label}>Email</label>
-            <input
-              style={styles.input}
-              name="email"
-              type="email"
-              placeholder="you@example.com"
-              value={form.email}
-              onChange={handleChange}
-              required
-            />
+          <div style={s.field}>
+            <label style={s.label}>Email</label>
+            <input style={s.input} name="email" type="email"
+              placeholder="you@example.com" value={form.email}
+              onChange={handleChange} required />
+          </div>
+          <div style={s.field}>
+            <label style={s.label}>Password</label>
+            <input style={s.input} name="password" type="password"
+              placeholder="••••••••" value={form.password}
+              onChange={handleChange} required />
           </div>
 
-          <div style={styles.field}>
-            <label style={styles.label}>Password</label>
-            <input
-              style={styles.input}
-              name="password"
-              type="password"
-              placeholder={mode === "signup" ? "Min. 8 characters" : "••••••••"}
-              value={form.password}
-              onChange={handleChange}
-              required
-            />
-          </div>
+          {error && <div style={s.errorBox}>{error}</div>}
 
-          {error && <div style={styles.errorBox}>{error}</div>}
-
-          <button type="submit" style={styles.btn} disabled={loading}>
+          <button type="submit" style={s.btn} disabled={loading}>
             {loading ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
           </button>
         </form>
 
-        <p style={styles.switchText}>
+        <p style={s.switchText}>
           {mode === "login" ? "Don't have an account? " : "Already have an account? "}
-          <span style={styles.switchLink} onClick={switchMode}>
+          <span style={s.link} onClick={switchMode}>
             {mode === "login" ? "Sign up" : "Sign in"}
           </span>
         </p>
@@ -112,102 +86,31 @@ export default function AuthPage() {
   );
 }
 
-const styles = {
-  page: {
-    minHeight: "100vh",
-    background: "#0f1117",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontFamily: "'Inter', sans-serif",
-    padding: "24px",
-  },
-  card: {
-    background: "#1a1d27",
-    border: "1px solid #2a2d3d",
-    borderRadius: "16px",
-    padding: "48px 44px",
-    width: "100%",
-    maxWidth: "420px",
-    boxShadow: "0 24px 64px rgba(0,0,0,0.5)",
-  },
-  brand: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    marginBottom: "32px",
-  },
-  logoRing: {
-    width: "44px",
-    height: "44px",
-    background: "rgba(96,165,250,0.12)",
-    border: "1px solid rgba(96,165,250,0.25)",
-    borderRadius: "10px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  brandName: {
-    color: "#f1f5f9",
-    fontSize: "18px",
-    fontWeight: "600",
-    letterSpacing: "-0.3px",
-  },
-  title: {
-    color: "#f1f5f9",
-    fontSize: "24px",
-    fontWeight: "700",
-    margin: "0 0 6px",
-    letterSpacing: "-0.5px",
-  },
-  sub: {
-    color: "#64748b",
-    fontSize: "14px",
-    margin: "0 0 28px",
-  },
-  form: { display: "flex", flexDirection: "column", gap: "18px" },
-  field: { display: "flex", flexDirection: "column", gap: "6px" },
-  label: { color: "#94a3b8", fontSize: "13px", fontWeight: "500" },
-  input: {
-    background: "#0f1117",
-    border: "1px solid #2a2d3d",
-    borderRadius: "8px",
-    padding: "12px 14px",
-    color: "#f1f5f9",
-    fontSize: "14px",
-    outline: "none",
-    transition: "border-color 0.2s",
-  },
-  errorBox: {
-    background: "rgba(239,68,68,0.1)",
-    border: "1px solid rgba(239,68,68,0.3)",
-    borderRadius: "8px",
-    padding: "10px 14px",
-    color: "#f87171",
-    fontSize: "13px",
-  },
-  btn: {
-    background: "#3b82f6",
-    color: "#fff",
-    border: "none",
-    borderRadius: "8px",
-    padding: "13px",
-    fontSize: "14px",
-    fontWeight: "600",
-    cursor: "pointer",
-    transition: "background 0.2s",
-    marginTop: "4px",
-  },
-  switchText: {
-    color: "#64748b",
-    fontSize: "13px",
-    textAlign: "center",
-    marginTop: "24px",
-    marginBottom: 0,
-  },
-  switchLink: {
-    color: "#60a5fa",
-    cursor: "pointer",
-    fontWeight: "500",
-  },
+const s = {
+  page: { minHeight:"100vh", background:"#f8fafc", display:"flex", alignItems:"center",
+    justifyContent:"center", fontFamily:"'Geist','DM Sans',system-ui,sans-serif", padding:"24px" },
+  card: { background:"#fff", border:"1px solid #e2e8f0", borderRadius:"16px",
+    padding:"44px 40px", width:"100%", maxWidth:"400px",
+    boxShadow:"0 4px 24px rgba(0,0,0,0.06)" },
+  brand: { display:"flex", alignItems:"center", gap:"9px", marginBottom:"28px" },
+  logoBox: { width:"34px", height:"34px", background:"#eff6ff", border:"1px solid #bfdbfe",
+    borderRadius:"8px", display:"flex", alignItems:"center", justifyContent:"center" },
+  brandName: { color:"#0f172a", fontSize:"16px", fontWeight:"700", letterSpacing:"-0.3px" },
+  title: { color:"#0f172a", fontSize:"22px", fontWeight:"700", margin:"0 0 4px",
+    letterSpacing:"-0.5px" },
+  sub: { color:"#64748b", fontSize:"13px", margin:"0 0 24px" },
+  form: { display:"flex", flexDirection:"column", gap:"16px" },
+  field: { display:"flex", flexDirection:"column", gap:"5px" },
+  label: { color:"#374151", fontSize:"13px", fontWeight:"500" },
+  input: { background:"#fff", border:"1px solid #d1d5db", borderRadius:"8px",
+    padding:"10px 13px", color:"#0f172a", fontSize:"14px", outline:"none",
+    transition:"border-color 0.15s", fontFamily:"inherit" },
+  errorBox: { background:"#fef2f2", border:"1px solid #fecaca", borderRadius:"8px",
+    padding:"10px 13px", color:"#dc2626", fontSize:"13px" },
+  btn: { background:"#2563eb", color:"#fff", border:"none", borderRadius:"8px",
+    padding:"11px", fontSize:"14px", fontWeight:"600", cursor:"pointer",
+    marginTop:"2px", fontFamily:"inherit" },
+  switchText: { color:"#64748b", fontSize:"13px", textAlign:"center",
+    marginTop:"20px", marginBottom:0 },
+  link: { color:"#2563eb", cursor:"pointer", fontWeight:"500" },
 };

@@ -7,88 +7,81 @@ export default function DocumentUpload({ onUpload, uploading, uploadProgress }) 
 
   const handleFile = (file) => {
     if (!file) return;
-    if (file.type !== "application/pdf") {
-      alert("Only PDF files are supported.");
-      return;
-    }
-    if (file.size > 200 * 1024 * 1024) {
-      alert("File too large. Max 200MB.");
-      return;
-}
+    if (file.type !== "application/pdf") { alert("Only PDF files are supported."); return; }
+    if (file.size > 200 * 1024 * 1024) { alert("File too large. Max 200MB."); return; }
     setSelectedFile(file);
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    handleFile(file);
+    handleFile(e.dataTransfer.files[0]);
   };
 
   const handleSubmit = async () => {
     if (!selectedFile || uploading) return;
     const result = await onUpload(selectedFile);
-    if (result.success) setSelectedFile(null);
+    if (result?.success) setSelectedFile(null);
   };
 
   return (
     <div style={s.wrapper}>
-      {/* Drop zone */}
       <div
-        style={{ ...s.dropZone, ...(dragOver ? s.dropZoneActive : {}) }}
+        style={{ ...s.dropZone, ...(dragOver ? s.dropActive : {}), ...(selectedFile ? s.dropSelected : {}) }}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         onClick={() => !selectedFile && inputRef.current?.click()}
       >
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".pdf"
-          style={{ display: "none" }}
-          onChange={(e) => handleFile(e.target.files[0])}
-        />
+        <input ref={inputRef} type="file" accept=".pdf" style={{ display:"none" }}
+          onChange={(e) => handleFile(e.target.files[0])} />
 
         {selectedFile ? (
-          <div style={s.fileSelected}>
-            <div style={s.fileIcon}>📄</div>
-            <div style={s.fileName}>{selectedFile.name}</div>
-            <div style={s.fileSize}>{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</div>
-            <button
-              style={s.clearBtn}
-              onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}
-            >
-              ✕ Remove
+          <div style={s.fileInfo}>
+            <div style={s.fileIconBox}>
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
+                  stroke="#2563eb" strokeWidth="1.7"/>
+                <path d="M12 2v4h4" stroke="#2563eb" strokeWidth="1.4" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <div>
+              <div style={s.fileName}>{selectedFile.name}</div>
+              <div style={s.fileSize}>{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</div>
+            </div>
+            <button style={s.removeBtn}
+              onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}>
+              ✕
             </button>
           </div>
         ) : (
-          <div style={s.dropHint}>
-            <div style={s.uploadIcon}>⬆</div>
-            <div style={s.dropTitle}>Drop PDF here or click to browse</div>
-            <div style={s.dropSub}>Max 50MB · PDF only</div>
+          <div style={s.hint}>
+            <div style={s.uploadIconBox}>
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                <path d="M10 14V4M6 8l4-4 4 4" stroke="#2563eb" strokeWidth="1.8"
+                  strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M3 16h14" stroke="#2563eb" strokeWidth="1.6" strokeLinecap="round"/>
+              </svg>
+            </div>
+            <div style={s.hintTitle}>Drop PDF here or click to browse</div>
+            <div style={s.hintSub}>Max 200MB · PDF only</div>
           </div>
         )}
       </div>
 
-      {/* Upload progress bar */}
       {uploading && (
         <div style={s.progressWrap}>
-          <div style={s.progressTrack}>
-            <div style={{ ...s.progressBar, width: `${uploadProgress}%` }} />
+          <div style={s.track}>
+            <div style={{ ...s.bar, width:`${uploadProgress}%` }} />
           </div>
-          <span style={s.progressLabel}>{uploadProgress}%</span>
+          <span style={s.pct}>{uploadProgress}%</span>
         </div>
       )}
 
-      {/* Upload button */}
       <button
-        style={{
-          ...s.uploadBtn,
-          ...((!selectedFile || uploading) ? s.uploadBtnDisabled : {}),
-        }}
+        style={{ ...s.btn, ...(!selectedFile || uploading ? s.btnDisabled : {}) }}
         onClick={handleSubmit}
-        disabled={!selectedFile || uploading}
-      >
+        disabled={!selectedFile || uploading}>
         {uploading ? "Uploading…" : "Upload & Process"}
       </button>
     </div>
@@ -96,46 +89,35 @@ export default function DocumentUpload({ onUpload, uploading, uploadProgress }) 
 }
 
 const s = {
-  wrapper: { display: "flex", flexDirection: "column", gap: "14px" },
-  dropZone: {
-    border: "2px dashed #2a2d3d",
-    borderRadius: "12px",
-    padding: "40px 24px",
-    textAlign: "center",
-    cursor: "pointer",
-    background: "#0f1117",
-    transition: "border-color 0.2s, background 0.2s",
-  },
-  dropZoneActive: {
-    borderColor: "#3b82f6",
-    background: "rgba(59,130,246,0.05)",
-  },
-  dropHint: { display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" },
-  uploadIcon: { fontSize: "32px", color: "#3b82f6" },
-  dropTitle: { color: "#94a3b8", fontSize: "15px", fontWeight: "500" },
-  dropSub: { color: "#475569", fontSize: "13px" },
-  fileSelected: { display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" },
-  fileIcon: { fontSize: "36px" },
-  fileName: { color: "#f1f5f9", fontSize: "14px", fontWeight: "500", wordBreak: "break-all" },
-  fileSize: { color: "#64748b", fontSize: "12px" },
-  clearBtn: {
-    background: "transparent", border: "1px solid #2a2d3d",
-    color: "#94a3b8", borderRadius: "6px", padding: "4px 12px",
-    fontSize: "12px", cursor: "pointer", marginTop: "4px",
-  },
-  progressWrap: { display: "flex", alignItems: "center", gap: "10px" },
-  progressTrack: {
-    flex: 1, height: "6px", background: "#1e2130", borderRadius: "99px", overflow: "hidden",
-  },
-  progressBar: {
-    height: "100%", background: "#3b82f6", borderRadius: "99px",
-    transition: "width 0.3s ease",
-  },
-  progressLabel: { color: "#64748b", fontSize: "12px", minWidth: "32px" },
-  uploadBtn: {
-    background: "#3b82f6", color: "#fff", border: "none",
-    borderRadius: "8px", padding: "12px", fontSize: "14px",
-    fontWeight: "600", cursor: "pointer", transition: "opacity 0.2s",
-  },
-  uploadBtnDisabled: { opacity: 0.4, cursor: "not-allowed" },
+  wrapper: { display:"flex", flexDirection:"column", gap:"12px" },
+  dropZone: { border:"2px dashed #e2e8f0", borderRadius:"10px", padding:"28px 16px",
+    textAlign:"center", cursor:"pointer", background:"#f8fafc",
+    transition:"border-color 0.15s, background 0.15s" },
+  dropActive: { borderColor:"#2563eb", background:"#eff6ff" },
+  dropSelected: { borderColor:"#bfdbfe", background:"#eff6ff", cursor:"default" },
+  hint: { display:"flex", flexDirection:"column", alignItems:"center", gap:"7px" },
+  uploadIconBox: { width:"36px", height:"36px", background:"#eff6ff", border:"1px solid #bfdbfe",
+    borderRadius:"8px", display:"flex", alignItems:"center",
+    justifyContent:"center", margin:"0 auto" },
+  hintTitle: { color:"#374151", fontSize:"13px", fontWeight:"500" },
+  hintSub: { color:"#94a3b8", fontSize:"12px" },
+  fileInfo: { display:"flex", alignItems:"center", gap:"10px", textAlign:"left" },
+  fileIconBox: { width:"32px", height:"32px", background:"#eff6ff", border:"1px solid #bfdbfe",
+    borderRadius:"7px", display:"flex", alignItems:"center",
+    justifyContent:"center", flexShrink:0 },
+  fileName: { color:"#0f172a", fontSize:"13px", fontWeight:"500",
+    wordBreak:"break-all", lineHeight:"1.3" },
+  fileSize: { color:"#94a3b8", fontSize:"11px", marginTop:"2px" },
+  removeBtn: { marginLeft:"auto", background:"transparent", border:"none",
+    color:"#94a3b8", cursor:"pointer", fontSize:"13px", padding:"4px",
+    flexShrink:0 },
+  progressWrap: { display:"flex", alignItems:"center", gap:"9px" },
+  track: { flex:1, height:"5px", background:"#e2e8f0", borderRadius:"99px", overflow:"hidden" },
+  bar: { height:"100%", background:"#2563eb", borderRadius:"99px",
+    transition:"width 0.3s ease" },
+  pct: { color:"#64748b", fontSize:"12px", minWidth:"30px" },
+  btn: { background:"#2563eb", color:"#fff", border:"none", borderRadius:"8px",
+    padding:"10px", fontSize:"13px", fontWeight:"600", cursor:"pointer",
+    fontFamily:"inherit" },
+  btnDisabled: { background:"#e2e8f0", color:"#94a3b8", cursor:"not-allowed" },
 };

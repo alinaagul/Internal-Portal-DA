@@ -1,27 +1,57 @@
 import { useEffect, useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
 import { useDocuments } from "../hooks/useDocuments";
 
+const getDocName = (d) => d?.original_filename || d?.filename || "Untitled";
+const getDocShort = (d, max = 30) => {
+  const n = getDocName(d);
+  return n.length > max ? n.slice(0, max) + "…" : n;
+};
+
 export default function ChatPage() {
-  const { user, logout }  = useAuth();
-  const navigate          = useNavigate();
+  const { user } = useAuth();
+  const location = useLocation();
   const {
     sessions, activeSession, messages, sending, loading,
     fetchSessions, openSession, createSession, updateTitle, deleteSession, sendMessage,
   } = useChat();
   const { documents, fetchDocuments } = useDocuments();
 
-  const [input, setInput]             = useState("");
-  const [selectedDoc, setSelectedDoc] = useState(null);
-  const [editingTitle, setEditingTitle] = useState(null);
-  const [titleInput, setTitleInput]   = useState("");
-  const [showDocPicker, setShowDocPicker] = useState(false);
+  const [input, setInput]                   = useState("");
+  const [selectedDoc, setSelectedDoc]       = useState(null);
+  const [editingTitle, setEditingTitle]     = useState(null);
+  const [titleInput, setTitleInput]         = useState("");
+  const [showDocPicker, setShowDocPicker]   = useState(false);
+  const [hoveredSession, setHoveredSession] = useState(null);
   const bottomRef = useRef();
 
-  useEffect(() => { fetchSessions(); fetchDocuments(); }, []);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  useEffect(() => {
+    fetchSessions();
+    fetchDocuments();
+  }, []);
+
+  useEffect(() => {
+    if (location.state?.documentId && documents.length > 0) {
+      const doc = documents.find((d) => d.id === location.state.documentId);
+      if (doc) setSelectedDoc(doc);
+    }
+  }, [location.state, documents]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Close doc picker on outside click
+  useEffect(() => {
+    if (!showDocPicker) return;
+    const handler = () => setShowDocPicker(false);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showDocPicker]);
+
+  const readyDocs = documents.filter((d) => d.status === "ready");
 
   const handleSend = async () => {
     if (!input.trim() || sending) return;
@@ -44,278 +74,521 @@ export default function ChatPage() {
     setEditingTitle(null);
   };
 
-  const readyDocs = documents.filter((d) => d.status === "ready");
+  const formatTime = (iso) => {
+    if (!iso) return "";
+    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
 
   return (
     <div style={s.page}>
-      {/* ── Top Nav ── */}
-      <nav style={s.nav}>
-        <div style={s.navLeft}>
-          <div style={s.logoBox} onClick={() => navigate("/dashboard")} title="Back to Dashboard">
-            <svg width="18" height="18" viewBox="0 0 28 28" fill="none">
-              <path d="M4 6h20M4 12h14M4 18h18M4 24h10" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round"/>
+      <style>{`
+        @keyframes bounce3 { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
+        @keyframes fadeIn   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+      `}</style>
+
+      {/* ── Sessions Sidebar ── */}
+      <aside style={s.sidebar}>
+        <div style={s.sideHead}>
+          <span style={s.sideTitle}>Conversations</span>
+          <button
+            style={s.newBtn}
+            title="New chat"
+            onClick={() => createSession(selectedDoc?.id || null)}
+          >
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+              <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
-          </div>
-          <span style={s.brandName}>DocAssist</span>
-          <span style={s.pageBadge}>Chat</span>
+          </button>
         </div>
-        <div style={s.navRight}>
-          {/* Document selector */}
-          <div style={s.docSelectorWrap}>
-            <button style={s.docSelector} onClick={() => setShowDocPicker(!showDocPicker)}>
-              📄 {selectedDoc ? selectedDoc.original_filename.slice(0, 25) + "..." : "No document selected"}
-              <span style={s.chevron}>▾</span>
-            </button>
-            {showDocPicker && (
-              <div style={s.docDropdown}>
+
+        {/* Document context for new chats */}
+        <div style={s.docSelectorWrap} onClick={(e) => e.stopPropagation()}>
+          <button
+            style={s.docSelectorBtn}
+            onClick={() => setShowDocPicker(!showDocPicker)}
+          >
+            <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
+              <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
+                stroke="currentColor" strokeWidth="1.7" />
+            </svg>
+            <span style={s.docSelectorLabel}>
+              {selectedDoc ? getDocShort(selectedDoc, 22) : "No document selected"}
+            </span>
+            <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
+              <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
+
+          {showDocPicker && (
+            <div style={s.dropdown}>
+              <div
+                style={{ ...s.dropItem, ...(selectedDoc === null ? s.dropItemActive : {}) }}
+                onClick={() => { setSelectedDoc(null); setShowDocPicker(false); }}
+              >
+                <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
+                  <path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H6l-4 4V4z"
+                    stroke="#64748b" strokeWidth="1.7" />
+                </svg>
+                <span style={{ flex: 1 }}>General chat</span>
+                {!selectedDoc && <span style={s.checkMark}>✓</span>}
+              </div>
+
+              {readyDocs.length === 0 && (
+                <div style={s.dropDisabled}>No ready documents</div>
+              )}
+
+              {readyDocs.map((d) => (
                 <div
-                  style={s.docOption}
-                  onClick={() => { setSelectedDoc(null); setShowDocPicker(false); }}
+                  key={d.id}
+                  style={{ ...s.dropItem, ...(selectedDoc?.id === d.id ? s.dropItemActive : {}) }}
+                  onClick={() => { setSelectedDoc(d); setShowDocPicker(false); }}
                 >
-                  <span>💬</span> General chat (no document)
+                  <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
+                    <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
+                      stroke="#2563eb" strokeWidth="1.7" />
+                  </svg>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: "#0f172a", fontSize: "12px", fontWeight: "500",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {getDocName(d)}
+                    </div>
+                    {d.ocr?.total_pages && (
+                      <div style={{ color: "#94a3b8", fontSize: "10px" }}>{d.ocr.total_pages} pages</div>
+                    )}
+                  </div>
+                  {selectedDoc?.id === d.id && <span style={s.checkMark}>✓</span>}
                 </div>
-                {readyDocs.length === 0 && (
-                  <div style={s.docOptionDisabled}>No ready documents — upload one first</div>
-                )}
-                {readyDocs.map((d) => (
-                  <div
-                    key={d.document_id}
-                    style={{ ...s.docOption, ...(selectedDoc?.document_id === d.document_id ? s.docOptionActive : {}) }}
-                    onClick={() => { setSelectedDoc(d); setShowDocPicker(false); }}
-                  >
-                    <span>📄</span>
-                    <div>
-                      <div style={s.docOptionName}>{d.filename}</div>
-                      <div style={s.docOptionMeta}>{d.ocr?.total_pages} pages · {d.chunking?.total_chunks} chunks</div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={s.sessionList}>
+          {sessions.length === 0 && (
+            <div style={s.noSessions}>No conversations yet.<br />Type a message to start.</div>
+          )}
+
+          {sessions.map((sess) => (
+            <div
+              key={sess.id}
+              style={{
+                ...s.sessionItem,
+                ...(activeSession?.id === sess.id ? s.sessionActive : {}),
+                background: activeSession?.id === sess.id
+                  ? "#eff6ff"
+                  : hoveredSession === sess.id ? "#f8fafc" : "transparent",
+              }}
+              onClick={() => openSession(sess.id)}
+              onMouseEnter={() => setHoveredSession(sess.id)}
+              onMouseLeave={() => setHoveredSession(null)}
+            >
+              {editingTitle === sess.id ? (
+                <input
+                  style={s.titleInput}
+                  value={titleInput}
+                  autoFocus
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  onBlur={() => handleTitleSave(sess.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter")  handleTitleSave(sess.id);
+                    if (e.key === "Escape") setEditingTitle(null);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <>
+                  <div style={s.sessRow}>
+                    <svg width="11" height="11" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
+                      <path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H6l-4 4V4z"
+                        stroke={activeSession?.id === sess.id ? "#2563eb" : "#94a3b8"}
+                        strokeWidth="1.7" strokeLinejoin="round" />
+                    </svg>
+                    <span style={s.sessTitle}>{sess.title || "New Chat"}</span>
+                    <div style={{
+                      ...s.sessActions,
+                      opacity: hoveredSession === sess.id || activeSession?.id === sess.id ? 1 : 0,
+                    }}>
+                      <button
+                        style={s.iconBtn}
+                        title="Rename"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingTitle(sess.id);
+                          setTitleInput(sess.title || "");
+                        }}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                          <path d="M11 2l3 3-8 8H3v-3l8-8z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                      <button
+                        style={{ ...s.iconBtn, color: "#ef4444" }}
+                        title="Delete"
+                        onClick={(e) => { e.stopPropagation(); deleteSession(sess.id); }}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                          <path d="M3 4h10M6 2h4M5 4l.5 9h5l.5-9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                        </svg>
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <span style={s.userChip}>{user?.full_name}</span>
-          <button style={s.logoutBtn} onClick={() => { logout(); navigate("/login"); }}>Sign out</button>
-        </div>
-      </nav>
-
-      <div style={s.layout}>
-        {/* ── Sessions Sidebar ── */}
-        <div style={s.sidebar}>
-          <div style={s.sidebarHeader}>
-            <span style={s.sidebarTitle}>Conversations</span>
-            <button style={s.newChatBtn} onClick={() => createSession(selectedDoc?.id || null)} title="New Chat">
-              ＋
-            </button>
-          </div>
-
-          <div style={s.sessionList}>
-            {sessions.length === 0 && (
-              <div style={s.noSessions}>No conversations yet.<br/>Start by typing a message.</div>
-            )}
-            {sessions.map((s_) => (
-              <div
-                key={s_.id}
-                style={{ ...s.sessionItem, ...(activeSession?.id === s_.id ? s.sessionItemActive : {}) }}
-                onClick={() => openSession(s_.id)}
-              >
-                {editingTitle === s_.id ? (
-                  <input
-                    style={s.titleInput}
-                    value={titleInput}
-                    autoFocus
-                    onChange={(e) => setTitleInput(e.target.value)}
-                    onBlur={() => handleTitleSave(s_.id)}
-                    onKeyDown={(e) => e.key === "Enter" && handleTitleSave(s_.id)}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <>
-                    <div style={s.sessionMeta}>
-                      <span style={s.sessionTitle}>{s_.title}</span>
-                      <div style={s.sessionActions}>
-                        <span style={s.iconBtn} title="Rename"
-                          onClick={(e) => { e.stopPropagation(); setEditingTitle(s_.id); setTitleInput(s_.title); }}>✏</span>
-                        <span style={s.iconBtnRed} title="Delete"
-                          onClick={(e) => { e.stopPropagation(); deleteSession(s_.id); }}>🗑</span>
-                      </div>
+                  {sess.document_id && (
+                    <div style={s.sessDoc}>
+                      📄 {readyDocs.find((d) => d.id === sess.document_id)
+                        ? getDocShort(readyDocs.find((d) => d.id === sess.document_id), 24)
+                        : "Document"}
                     </div>
-                    {s_.last_message && <div style={s.sessionPreview}>{s_.last_message.slice(0, 60)}...</div>}
-                    {s_.document_id && <div style={s.sessionDoc}>📄 Document attached</div>}
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
+                  )}
+                  {sess.message_count > 0 && (
+                    <div style={s.sessMeta}>{sess.message_count} msg{sess.message_count > 1 ? "s" : ""}</div>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
         </div>
+      </aside>
 
-        {/* ── Chat Area ── */}
-        <div style={s.chatArea}>
-          {/* Messages */}
-          <div style={s.messages}>
-            {!activeSession && messages.length === 0 && (
-              <div style={s.welcomeBox}>
-                <div style={s.welcomeIcon}>🤖</div>
-                <h2 style={s.welcomeTitle}>Contract Intelligence Assistant</h2>
-                <p style={s.welcomeSub}>
-                  {selectedDoc
-                    ? `Ask anything about "${selectedDoc.original_filename}"`
-                    : "Select a document above to ask questions about it, or chat generally."}
-                </p>
-                <div style={s.suggestions}>
-                  {["What are the payment terms?", "What are the termination clauses?", "Summarize this contract", "What is the contract duration?"].map((q) => (
-                    <button key={q} style={s.suggBtn} onClick={() => setInput(q)}>{q}</button>
-                  ))}
-                </div>
+      {/* ── Chat Area ── */}
+      <div style={s.chatArea}>
+
+        {/* Document context banner */}
+        {selectedDoc && (
+          <div style={s.docBanner}>
+            <div style={s.bannerLeft}>
+              <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+                <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
+                  stroke="#2563eb" strokeWidth="1.7" />
+              </svg>
+              <span style={s.bannerMode}>RAG mode</span>
+              <span style={s.bannerDoc}>— {getDocName(selectedDoc)}</span>
+            </div>
+            <button style={s.bannerClear} onClick={() => setSelectedDoc(null)}>✕ Clear</button>
+          </div>
+        )}
+
+        {/* Messages */}
+        <div style={s.messages}>
+          {messages.length === 0 && (
+            <div style={s.welcome}>
+              <div style={s.welcomeIcon}>
+                <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
+                  <path d="M4 8a4 4 0 014-4h24a4 4 0 014 4v16a4 4 0 01-4 4H12l-8 8V8z"
+                    fill="#dbeafe" stroke="#93c5fd" strokeWidth="1.5" />
+                </svg>
               </div>
-            )}
+              <h3 style={s.welcomeTitle}>
+                {selectedDoc
+                  ? `Ask anything about "${getDocShort(selectedDoc, 32)}"`
+                  : "Start a conversation"}
+              </h3>
+              <p style={s.welcomeSub}>
+                {selectedDoc
+                  ? "I'll search through the document and give you accurate, sourced answers."
+                  : "Select a document from the sidebar for grounded, RAG-powered answers."}
+              </p>
+              {!selectedDoc && readyDocs.length > 0 && (
+                <p style={s.welcomeHint}>
+                  💡 {readyDocs.length} document{readyDocs.length > 1 ? "s" : ""} ready — pick one in the sidebar for RAG mode
+                </p>
+              )}
+            </div>
+          )}
 
-            {messages.map((msg, i) => (
-              <div key={msg.id || i} style={{ ...s.msgRow, ...(msg.role === "user" ? s.msgRowUser : {}) }}>
-                <div style={{ ...s.msgBubble, ...(msg.role === "user" ? s.msgBubbleUser : s.msgBubbleAI) }}>
-                  <div style={s.msgRole}>{msg.role === "user" ? "You" : "🤖 Assistant"}</div>
-                  <div style={s.msgContent}>{msg.content}</div>
+          {messages.map((msg, i) => {
+            const isUser = msg.role === "user";
+            return (
+              <div key={msg.id || i} style={{ ...s.msgRow, ...(isUser ? s.msgRowUser : {}) }}>
+                <div style={{
+                  ...s.bubble,
+                  ...(isUser ? s.bubbleUser : s.bubbleAI),
+                  animation: "fadeIn 0.2s ease",
+                }}>
+                  <div style={{ ...s.msgRole, color: isUser ? "rgba(255,255,255,0.55)" : "#94a3b8" }}>
+                    {isUser ? "You" : "DocAssist"}
+                  </div>
+                  <div style={{ ...s.msgContent, color: isUser ? "#fff" : "#0f172a" }}>
+                    {msg.content}
+                  </div>
 
-                  {/* Sources */}
-                  {msg.sources?.length > 0 && (
+                  {msg.sources && msg.sources.length > 0 && (
                     <div style={s.sources}>
-                      <div style={s.sourcesTitle}>📎 Sources used:</div>
-                      {msg.sources.slice(0, 3).map((src, j) => (
-                        <div key={j} style={s.sourceItem}>
-                          <span style={s.sourceBadge}>{src.relevance_pct?.toFixed(0)}%</span>
-                          {src.section_title && <span style={s.sourceSection}>{src.section_title}</span>}
-                          <span style={s.sourcePage}>p.{src.page}</span>
+                      <div style={s.sourcesTitle}>Sources</div>
+                      {msg.sources.map((src, si) => (
+                        <div key={si} style={s.sourceItem}>
+                          <span style={s.srcBadge}>p.{src.page_number}</span>
+                          <span style={s.srcSection}>{src.section_title}</span>
+                          {src.score && (
+                            <span style={s.srcScore}>{Math.round(src.score * 100)}%</span>
+                          )}
                         </div>
                       ))}
                     </div>
                   )}
 
-                  <div style={s.msgTime}>
-                    {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  <div style={{ ...s.msgTime, color: isUser ? "rgba(255,255,255,0.35)" : "#cbd5e1" }}>
+                    {formatTime(msg.created_at)}
                   </div>
                 </div>
               </div>
-            ))}
+            );
+          })}
 
-            {sending && (
-              <div style={s.msgRow}>
-                <div style={s.msgBubbleAI}>
-                  <div style={s.msgRole}>🤖 Assistant</div>
-                  <div style={s.typing}><span/><span/><span/></div>
+          {sending && (
+            <div style={s.msgRow}>
+              <div style={{ ...s.bubble, ...s.bubbleAI }}>
+                <div style={s.typing}>
+                  {[0, 1, 2].map((i) => (
+                    <span key={i} style={{ ...s.dot3, animationDelay: `${i * 0.18}s` }} />
+                  ))}
                 </div>
               </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
-
-          {/* Input bar */}
-          <div style={s.inputBar}>
-            {selectedDoc && (
-              <div style={s.docBadge}>
-                📄 {selectedDoc.original_filename.slice(0, 30)}
-                <span style={s.docBadgeRemove} onClick={() => setSelectedDoc(null)}>✕</span>
-              </div>
-            )}
-            <div style={s.inputRow}>
-              <textarea
-                style={s.textarea}
-                placeholder={selectedDoc ? `Ask about ${selectedDoc.original_filename}...` : "Type a message..."}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                rows={1}
-              />
-              <button style={{ ...s.sendBtn, opacity: (!input.trim() || sending) ? 0.4 : 1 }}
-                onClick={handleSend} disabled={!input.trim() || sending}>
-                {sending ? "⏳" : "➤"}
-              </button>
             </div>
-            <div style={s.inputHint}>Enter to send · Shift+Enter for new line · Model: {selectedDoc ? "RAG + qwen2.5:7b" : "qwen2.5:7b"}</div>
+          )}
+
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Input bar */}
+        <div style={s.inputBar}>
+          <div style={s.inputRow}>
+            <textarea
+              style={s.textarea}
+              placeholder={selectedDoc
+                ? `Ask about "${getDocShort(selectedDoc, 24)}"…`
+                : "Type a message…"}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={1}
+            />
+            <button
+              style={{ ...s.sendBtn, opacity: (!input.trim() || sending) ? 0.4 : 1 }}
+              onClick={handleSend}
+              disabled={!input.trim() || sending}
+            >
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                <path d="M3 10l14-7-5 7 5 7-14-7z" fill="white" />
+              </svg>
+            </button>
+          </div>
+          <div style={s.inputHint}>
+            Enter to send · Shift+Enter for new line
+            {selectedDoc ? " · RAG mode" : " · General mode"}
           </div>
         </div>
       </div>
-
-      <style>{`
-        @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
-      `}</style>
     </div>
   );
 }
 
 const s = {
-  page:       { height:"100vh", display:"flex", flexDirection:"column", background:"#0f1117", fontFamily:"'Inter',sans-serif", overflow:"hidden" },
-  nav:        { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 24px", borderBottom:"1px solid #1e2130", flexShrink:0 },
-  navLeft:    { display:"flex", alignItems:"center", gap:"10px" },
-  logoBox:    { width:"32px", height:"32px", background:"rgba(96,165,250,0.1)", border:"1px solid rgba(96,165,250,0.2)", borderRadius:"7px", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" },
-  brandName:  { color:"#f1f5f9", fontWeight:"700", fontSize:"15px" },
-  pageBadge:  { background:"rgba(59,130,246,0.15)", color:"#60a5fa", borderRadius:"5px", padding:"2px 8px", fontSize:"11px", fontWeight:"600" },
-  navRight:   { display:"flex", alignItems:"center", gap:"10px" },
-  docSelectorWrap: { position:"relative" },
-  docSelector: { background:"#1a1d27", border:"1px solid #2a2d3d", color:"#94a3b8", borderRadius:"8px", padding:"6px 12px", fontSize:"13px", cursor:"pointer", display:"flex", alignItems:"center", gap:"8px", maxWidth:"280px" },
-  chevron:    { color:"#475569", fontSize:"10px" },
-  docDropdown:{ position:"absolute", top:"calc(100% + 6px)", right:0, background:"#1a1d27", border:"1px solid #2a2d3d", borderRadius:"10px", padding:"6px", minWidth:"280px", zIndex:100, boxShadow:"0 8px 24px rgba(0,0,0,0.4)" },
-  docOption:  { display:"flex", alignItems:"flex-start", gap:"10px", padding:"10px 12px", borderRadius:"7px", cursor:"pointer", color:"#94a3b8", fontSize:"13px", transition:"background 0.15s" },
-  docOptionActive: { background:"rgba(59,130,246,0.12)", color:"#60a5fa" },
-  docOptionDisabled: { padding:"10px 12px", color:"#475569", fontSize:"12px" },
-  docOptionName: { color:"#f1f5f9", fontSize:"13px", fontWeight:"500" },
-  docOptionMeta: { color:"#64748b", fontSize:"11px" },
-  userChip:   { background:"#1a1d27", border:"1px solid #2a2d3d", color:"#94a3b8", borderRadius:"20px", padding:"4px 12px", fontSize:"12px" },
-  logoutBtn:  { background:"transparent", border:"1px solid #2a2d3d", color:"#64748b", borderRadius:"6px", padding:"5px 12px", fontSize:"12px", cursor:"pointer" },
+  page: {
+    display: "flex",
+    height: "100%",
+    overflow: "hidden",
+    background: "#f8fafc",
+    fontFamily: "'Plus Jakarta Sans', 'DM Sans', system-ui, sans-serif",
+  },
 
-  layout:     { display:"flex", flex:1, overflow:"hidden" },
+  /* Sessions sidebar */
+  sidebar: {
+    width: "240px",
+    minWidth: "240px",
+    borderRight: "1px solid #e2e8f0",
+    display: "flex",
+    flexDirection: "column",
+    background: "#fff",
+    flexShrink: 0,
+    overflow: "hidden",
+  },
+  sideHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "14px 14px 8px",
+    borderBottom: "1px solid #f1f5f9",
+  },
+  sideTitle: {
+    color: "#374151",
+    fontSize: "11px",
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: "0.6px",
+  },
+  newBtn: {
+    width: "26px",
+    height: "26px",
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    color: "#2563eb",
+    borderRadius: "6px",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  docSelectorWrap: {
+    padding: "8px 10px",
+    borderBottom: "1px solid #f1f5f9",
+    position: "relative",
+  },
+  docSelectorBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    width: "100%",
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    borderRadius: "7px",
+    padding: "7px 10px",
+    fontSize: "11px",
+    color: "#64748b",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    textAlign: "left",
+  },
+  docSelectorLabel: {
+    flex: 1,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  dropdown: {
+    position: "absolute",
+    top: "calc(100% - 4px)",
+    left: "10px",
+    right: "10px",
+    background: "#fff",
+    border: "1px solid #e2e8f0",
+    borderRadius: "10px",
+    padding: "6px",
+    zIndex: 200,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+    maxHeight: "220px",
+    overflowY: "auto",
+  },
+  dropItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "8px 9px",
+    borderRadius: "6px",
+    cursor: "pointer",
+    color: "#374151",
+    fontSize: "12px",
+    transition: "background 0.1s",
+  },
+  dropItemActive: { background: "#eff6ff", color: "#1d4ed8" },
+  dropDisabled: { padding: "8px 9px", color: "#94a3b8", fontSize: "11px" },
+  checkMark: { color: "#2563eb", fontSize: "12px", fontWeight: "700", marginLeft: "auto" },
 
-  // Sidebar
-  sidebar:    { width:"260px", borderRight:"1px solid #1e2130", display:"flex", flexDirection:"column", flexShrink:0 },
-  sidebarHeader: { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px", borderBottom:"1px solid #1e2130" },
-  sidebarTitle: { color:"#94a3b8", fontSize:"12px", fontWeight:"600", textTransform:"uppercase", letterSpacing:"0.5px" },
-  newChatBtn: { background:"rgba(59,130,246,0.15)", border:"1px solid rgba(59,130,246,0.3)", color:"#60a5fa", borderRadius:"6px", width:"28px", height:"28px", cursor:"pointer", fontSize:"16px", display:"flex", alignItems:"center", justifyContent:"center" },
-  sessionList:{ flex:1, overflowY:"auto", padding:"8px" },
-  noSessions: { color:"#475569", fontSize:"12px", textAlign:"center", padding:"24px 12px", lineHeight:"1.6" },
-  sessionItem:{ padding:"10px 12px", borderRadius:"8px", cursor:"pointer", marginBottom:"4px", transition:"background 0.15s" },
-  sessionItemActive: { background:"rgba(59,130,246,0.12)", border:"1px solid rgba(59,130,246,0.2)" },
-  sessionMeta:{ display:"flex", alignItems:"center", justifyContent:"space-between" },
-  sessionTitle: { color:"#f1f5f9", fontSize:"13px", fontWeight:"500", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
-  sessionActions: { display:"flex", gap:"4px", opacity:0, transition:"opacity 0.15s" },
-  iconBtn:    { cursor:"pointer", fontSize:"12px", padding:"2px 4px", borderRadius:"4px", color:"#64748b" },
-  iconBtnRed: { cursor:"pointer", fontSize:"12px", padding:"2px 4px", borderRadius:"4px", color:"#f87171" },
-  sessionPreview: { color:"#64748b", fontSize:"11px", marginTop:"3px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
-  sessionDoc: { color:"#60a5fa", fontSize:"10px", marginTop:"3px" },
-  titleInput: { background:"#0f1117", border:"1px solid #3b82f6", color:"#f1f5f9", borderRadius:"5px", padding:"3px 7px", fontSize:"12px", width:"100%", outline:"none" },
+  sessionList: { flex: 1, overflowY: "auto", padding: "6px 8px" },
+  noSessions: { color: "#94a3b8", fontSize: "12px", textAlign: "center", padding: "24px 12px", lineHeight: "1.7" },
+  sessionItem: {
+    padding: "9px 10px",
+    borderRadius: "8px",
+    cursor: "pointer",
+    marginBottom: "2px",
+    transition: "background 0.1s",
+    border: "1px solid transparent",
+  },
+  sessionActive: { border: "1px solid #bfdbfe" },
+  sessRow: { display: "flex", alignItems: "center", gap: "7px" },
+  sessTitle: {
+    color: "#0f172a", fontSize: "12px", fontWeight: "500", flex: 1,
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  sessActions: { display: "flex", gap: "2px", transition: "opacity 0.15s" },
+  iconBtn: {
+    background: "transparent", border: "none", cursor: "pointer",
+    padding: "3px 4px", color: "#94a3b8", borderRadius: "4px",
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  sessDoc: { color: "#2563eb", fontSize: "10px", marginTop: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  sessMeta: { color: "#94a3b8", fontSize: "10px", marginTop: "1px" },
+  titleInput: {
+    background: "#fff", border: "1px solid #2563eb", color: "#0f172a",
+    borderRadius: "5px", padding: "3px 7px", fontSize: "12px", width: "100%",
+    outline: "none", fontFamily: "inherit",
+  },
 
-  // Chat
-  chatArea:   { flex:1, display:"flex", flexDirection:"column", overflow:"hidden" },
-  messages:   { flex:1, overflowY:"auto", padding:"24px 32px", display:"flex", flexDirection:"column", gap:"16px" },
+  /* Chat area */
+  chatArea: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    background: "#f8fafc",
+    minWidth: 0,
+  },
+  docBanner: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    background: "#eff6ff",
+    borderBottom: "1px solid #bfdbfe",
+    padding: "8px 20px",
+    flexShrink: 0,
+  },
+  bannerLeft: { display: "flex", alignItems: "center", gap: "7px" },
+  bannerMode: { color: "#1d4ed8", fontSize: "12px", fontWeight: "700" },
+  bannerDoc: { color: "#3b82f6", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "300px" },
+  bannerClear: { background: "transparent", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: "12px", fontFamily: "inherit" },
 
-  welcomeBox: { margin:"auto", textAlign:"center", maxWidth:"500px", padding:"48px 24px" },
-  welcomeIcon:{ fontSize:"48px", marginBottom:"16px" },
-  welcomeTitle: { color:"#f1f5f9", fontSize:"22px", fontWeight:"700", margin:"0 0 8px" },
-  welcomeSub: { color:"#64748b", fontSize:"14px", margin:"0 0 28px", lineHeight:"1.6" },
-  suggestions:{ display:"flex", flexWrap:"wrap", gap:"8px", justifyContent:"center" },
-  suggBtn:    { background:"#1a1d27", border:"1px solid #2a2d3d", color:"#94a3b8", borderRadius:"8px", padding:"8px 14px", fontSize:"13px", cursor:"pointer", transition:"border-color 0.2s" },
+  messages: {
+    flex: 1, overflowY: "auto", padding: "20px 24px",
+    display: "flex", flexDirection: "column", gap: "14px",
+  },
+  welcome: {
+    margin: "auto", textAlign: "center", maxWidth: "460px", padding: "40px 20px",
+    display: "flex", flexDirection: "column", alignItems: "center", gap: "12px",
+  },
+  welcomeIcon: {
+    width: "60px", height: "60px", background: "#eff6ff",
+    border: "1px solid #bfdbfe", borderRadius: "16px",
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  welcomeTitle: { color: "#0f172a", fontSize: "19px", fontWeight: "700", margin: 0, letterSpacing: "-0.4px" },
+  welcomeSub: { color: "#64748b", fontSize: "14px", margin: 0, lineHeight: "1.65" },
+  welcomeHint: {
+    color: "#2563eb", fontSize: "13px",
+    background: "#eff6ff", border: "1px solid #bfdbfe",
+    borderRadius: "8px", padding: "10px 14px", margin: 0,
+  },
 
-  msgRow:     { display:"flex", justifyContent:"flex-start" },
-  msgRowUser: { justifyContent:"flex-end" },
-  msgBubble:  { maxWidth:"72%", borderRadius:"12px", padding:"12px 16px" },
-  msgBubbleAI:{ background:"#1a1d27", border:"1px solid #2a2d3d" },
-  msgBubbleUser: { background:"rgba(59,130,246,0.15)", border:"1px solid rgba(59,130,246,0.25)" },
-  msgRole:    { fontSize:"11px", fontWeight:"600", color:"#64748b", marginBottom:"6px", textTransform:"uppercase", letterSpacing:"0.5px" },
-  msgContent: { color:"#e2e8f0", fontSize:"14px", lineHeight:"1.65", whiteSpace:"pre-wrap" },
-  msgTime:    { color:"#475569", fontSize:"10px", marginTop:"8px", textAlign:"right" },
+  msgRow: { display: "flex", justifyContent: "flex-start" },
+  msgRowUser: { justifyContent: "flex-end" },
+  bubble: { maxWidth: "72%", borderRadius: "14px", padding: "12px 16px" },
+  bubbleAI: { background: "#fff", border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" },
+  bubbleUser: { background: "#2563eb", border: "none" },
+  msgRole: { fontSize: "10px", fontWeight: "700", marginBottom: "5px", textTransform: "uppercase", letterSpacing: "0.5px" },
+  msgContent: { fontSize: "14px", lineHeight: "1.65", whiteSpace: "pre-wrap" },
+  msgTime: { fontSize: "10px", marginTop: "7px", textAlign: "right" },
 
-  sources:    { marginTop:"12px", padding:"10px", background:"rgba(0,0,0,0.2)", borderRadius:"8px" },
-  sourcesTitle: { color:"#64748b", fontSize:"11px", fontWeight:"600", marginBottom:"6px" },
-  sourceItem: { display:"flex", alignItems:"center", gap:"8px", marginBottom:"4px" },
-  sourceBadge:{ background:"rgba(34,197,94,0.15)", color:"#4ade80", borderRadius:"4px", padding:"1px 6px", fontSize:"10px", fontWeight:"600" },
-  sourceSection: { color:"#94a3b8", fontSize:"11px" },
-  sourcePage: { color:"#475569", fontSize:"10px" },
+  sources: { marginTop: "10px", padding: "10px 12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" },
+  sourcesTitle: { color: "#64748b", fontSize: "10px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "7px" },
+  sourceItem: { display: "flex", alignItems: "center", gap: "7px", marginBottom: "5px" },
+  srcBadge: { background: "#f0fdf4", border: "1px solid #86efac", color: "#16a34a", borderRadius: "4px", padding: "1px 6px", fontSize: "10px", fontWeight: "600", flexShrink: 0 },
+  srcSection: { color: "#374151", fontSize: "11px", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  srcScore: { color: "#94a3b8", fontSize: "10px", flexShrink: 0 },
 
-  typing:     { display:"flex", gap:"4px", padding:"4px 0", "& span": { width:"6px", height:"6px", background:"#64748b", borderRadius:"50%", animation:"bounce 1.2s infinite" } },
+  typing: { display: "flex", gap: "4px", padding: "4px 2px", alignItems: "center" },
+  dot3: { width: "7px", height: "7px", background: "#cbd5e1", borderRadius: "50%", display: "inline-block", animation: "bounce3 1.2s infinite" },
 
-  // Input
-  inputBar:   { borderTop:"1px solid #1e2130", padding:"16px 24px", background:"#0f1117" },
-  docBadge:   { display:"inline-flex", alignItems:"center", gap:"8px", background:"rgba(59,130,246,0.1)", border:"1px solid rgba(59,130,246,0.2)", color:"#60a5fa", borderRadius:"6px", padding:"4px 10px", fontSize:"12px", marginBottom:"10px" },
-  docBadgeRemove: { cursor:"pointer", opacity:0.7, fontSize:"10px" },
-  inputRow:   { display:"flex", gap:"10px", alignItems:"flex-end" },
-  textarea:   { flex:1, background:"#1a1d27", border:"1px solid #2a2d3d", borderRadius:"10px", padding:"12px 16px", color:"#f1f5f9", fontSize:"14px", outline:"none", resize:"none", fontFamily:"inherit", lineHeight:"1.5", minHeight:"44px", maxHeight:"140px" },
-  sendBtn:    { background:"#3b82f6", border:"none", color:"#fff", borderRadius:"10px", width:"44px", height:"44px", fontSize:"18px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 },
-  inputHint:  { color:"#334155", fontSize:"11px", marginTop:"6px", textAlign:"center" },
+  inputBar: { borderTop: "1px solid #e2e8f0", padding: "14px 20px", background: "#fff", flexShrink: 0 },
+  inputRow: { display: "flex", gap: "9px", alignItems: "flex-end" },
+  textarea: {
+    flex: 1, background: "#f8fafc", border: "1px solid #e2e8f0",
+    borderRadius: "10px", padding: "11px 15px", color: "#0f172a",
+    fontSize: "14px", outline: "none", resize: "none", fontFamily: "inherit",
+    lineHeight: "1.5", minHeight: "44px", maxHeight: "130px",
+  },
+  sendBtn: {
+    background: "#2563eb", border: "none", color: "#fff", borderRadius: "10px",
+    width: "44px", height: "44px", cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    flexShrink: 0, transition: "opacity 0.15s",
+  },
+  inputHint: { color: "#94a3b8", fontSize: "11px", marginTop: "6px", textAlign: "center" },
 };
