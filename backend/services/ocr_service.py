@@ -5,8 +5,11 @@ PURPOSE:
   First step in the pipeline. Extracts text (+ tables) from uploaded PDFs/images.
   Two strategies:
     1. pdfplumber  — fast, perfect for digitally-created PDFs (text layer exists)
-    2. pytesseract — fallback for scanned PDFs (image-only, no text layer)
-  Auto-selects which to use per document based on text density per page.
+    2. PyMuPDF + pytesseract — fallback for scanned PDFs (image-only, no text layer)
+       PyMuPDF renders pages to images entirely in Python (no poppler / no system
+       dependencies). pytesseract then reads the images.
+       Install: pip install pymupdf pytesseract
+       Tesseract binary: https://github.com/UB-Mannheim/tesseract/wiki
 
 WHY THIS FILE EXISTS:
   Contracts arrive as PDFs. Many are scanned (no embedded text).
@@ -92,15 +95,33 @@ class OCRService:
 
         if pages and empty_pages > len(pages) * 0.5:
             logger.info(
-                f"[OCR] {empty_pages}/{len(pages)} pages near-empty → switching to Tesseract"
+                f"[OCR] {empty_pages}/{len(pages)} pages near-empty → trying Tesseract"
             )
-            pages = self._extract_with_tesseract(file_path)
-            method = "tesseract"
+            tesseract_pages = self._extract_with_tesseract(file_path)
+            if tesseract_pages:
+                pages  = tesseract_pages
+                method = "tesseract"
+            else:
+                # Tesseract unavailable (missing poppler / pytesseract) — keep
+                # pdfplumber output even if sparse rather than failing entirely.
+                logger.warning(
+                    "[OCR] Tesseract fallback produced no pages — keeping pdfplumber output.\n"
+                    "  To enable scanned PDF support, install the Tesseract binary:\n"
+                    "    1. Download installer: https://github.com/UB-Mannheim/tesseract/wiki\n"
+                    "    2. During install, check 'Add to PATH'\n"
+                    "    3. Restart the server\n"
+                    "  (PyMuPDF is already installed — no poppler needed)"
+                )
+                method = "pdfplumber"
         else:
             method = "pdfplumber"
 
         if not pages:
-            raise RuntimeError("OCR produced no pages — check file format")
+            raise RuntimeError(
+                "OCR produced no pages — check file format.\n"
+                "If this is a scanned PDF, ensure poppler is installed and in PATH.\n"
+                "Download: https://github.com/oschwartz10612/poppler-windows/releases"
+            )
 
         # Aggregate stats
         avg_conf = sum(p.confidence for p in pages) / len(pages)
@@ -173,44 +194,100 @@ class OCRService:
 
         return pages
 
-    # ── Strategy 2: Tesseract (scanned PDFs) ──────────────────────────────────
+    # ── Strategy 2: PyMuPDF + Tesseract (scanned PDFs) ───────────────────────
+    # PyMuPDF (fitz) renders PDF pages to images entirely in Python —
+    # no poppler, no system dependencies, no PATH configuration needed.
+    # Install: pip install pymupdf pytesseract
+    # (Tesseract binary still required: https://github.com/UB-Mannheim/tesseract/wiki)
 
     def _extract_with_tesseract(self, file_path: str) -> List[PageResult]:
         try:
             import pytesseract
-            from pdf2image import convert_from_path
         except ImportError:
-            logger.warning("[OCR] pytesseract/pdf2image not installed — falling back to pdfplumber")
-            return self._extract_with_pdfplumber(file_path)
+            logger.warning(
+                "[OCR] pytesseract not installed — pip install pytesseract\n"
+                "      Also install Tesseract binary: "
+                "https://github.com/UB-Mannheim/tesseract/wiki"
+            )
+            return []
+
+        # Point pytesseract at the Tesseract binary explicitly.
+        # This works even if Tesseract is not on the system PATH.
+        # Windows default install path is used as fallback.
+        import os, shutil
+        if not shutil.which("tesseract"):
+            # Check env variable first, then Windows default install path
+            env_path = os.environ.get("TESSERACT_CMD", "")
+            windows_default = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+            tesseract_path  = env_path if env_path and os.path.isfile(env_path) \
+                              else windows_default if os.path.isfile(windows_default) \
+                              else None
+            if tesseract_path:
+                pytesseract.pytesseract.tesseract_cmd = tesseract_path
+                logger.info(f"[OCR] Tesseract not in PATH — using: {tesseract_path}")
+            else:
+                logger.warning(
+                    "[OCR] Tesseract binary not found in PATH or default location.\n"
+                    "      Set the path explicitly by adding this to your .env or config:\n"
+                    "        TESSERACT_CMD=C:\\path\\to\\tesseract.exe\n"
+                    "      Or add Tesseract to your system PATH and restart."
+                )
+
+        # Ensure tessdata language files are locatable.
+        # Tesseract needs TESSDATA_PREFIX to point to the folder containing eng.traineddata.
+        if not os.environ.get("TESSDATA_PREFIX"):
+            windows_tessdata = r"C:\Program Files\Tesseract-OCR\tessdata"
+            if os.path.isdir(windows_tessdata):
+                os.environ["TESSDATA_PREFIX"] = windows_tessdata
+                logger.info(f"[OCR] TESSDATA_PREFIX not set — using: {windows_tessdata}")
+
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            logger.warning(
+                "[OCR] PyMuPDF not installed — pip install pymupdf\n"
+                "      PyMuPDF replaces pdf2image/poppler with zero system dependencies."
+            )
+            return []
 
         pages = []
         try:
-            images = convert_from_path(file_path, dpi=300)
-            for i, image in enumerate(images):
-                gray = image.convert("L")  # Grayscale → better OCR accuracy
+            doc = fitz.open(file_path)
+            for i, page in enumerate(doc):
+                # Render at 300 DPI — matrix scale = 300/72 ≈ 4.17
+                mat  = fitz.Matrix(300 / 72, 300 / 72)
+                pix  = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
 
+                # Convert PyMuPDF pixmap → PIL Image (no disk I/O needed)
+                from PIL import Image
+                import io
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+
+                # Tesseract OCR
                 data = pytesseract.image_to_data(
-                    gray,
+                    img,
                     output_type=pytesseract.Output.DICT,
                     config="--psm 6",   # Assume uniform block of text
                 )
+                confidences = [int(c) for c in data["conf"] if str(c).lstrip("-").isdigit() and int(c) > 0]
+                avg_conf    = sum(confidences) / len(confidences) if confidences else 0.0
 
-                confidences = [int(c) for c in data["conf"] if int(c) > 0]
-                avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
-
-                raw_text = pytesseract.image_to_string(gray, config="--psm 6")
+                raw_text   = pytesseract.image_to_string(img, config="--psm 6")
                 structured = self._clean_text(raw_text)
 
                 pages.append(PageResult(
-                    page_number=i + 1,
-                    raw_text=raw_text,
-                    structured_text=structured,
-                    confidence=round(avg_conf, 2),
-                    has_tables=False,
-                    extraction_method="tesseract",
+                    page_number      = i + 1,
+                    raw_text         = raw_text,
+                    structured_text  = structured,
+                    confidence       = round(avg_conf, 2),
+                    has_tables       = False,
+                    extraction_method= "tesseract+pymupdf",
                 ))
+
+            doc.close()
+
         except Exception as e:
-            logger.error(f"[OCR] Tesseract error: {e}")
+            logger.error(f"[OCR] Tesseract+PyMuPDF error: {e}")
 
         return pages
 

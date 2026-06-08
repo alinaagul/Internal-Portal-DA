@@ -24,7 +24,19 @@ NEW COLUMNS vs original (added for rich API response tracking):
     - embedding_status          (str)
 
   document_chunks:
-    - raw_content               (Text) — plain text for BM25 index
+    - raw_content               (Text)    — plain text for BM25 index
+    - overlap_prefix            (Text)    — sliding-window overlap text from previous chunk
+    - char_start                (Integer) — byte offset of chunk start in OCR full_text
+    - char_end                  (Integer) — byte offset of chunk end in OCR full_text
+    - section_depth             (Integer) — 0=article, 1=section, 2=subsection
+
+MIGRATION NOTE:
+  If upgrading an existing DB, run the Alembic migration (or manual ALTER TABLE):
+
+    ALTER TABLE dbo.document_chunks ADD overlap_prefix NVARCHAR(MAX) NULL;
+    ALTER TABLE dbo.document_chunks ADD char_start     INT           NULL;
+    ALTER TABLE dbo.document_chunks ADD char_end       INT           NULL;
+    ALTER TABLE dbo.document_chunks ADD section_depth  INT           NULL DEFAULT 0;
 
 NOTHING is stored locally that doesn't belong in DB.
 No JSON files. No pickle files. No local state outside SQL + ChromaDB.
@@ -101,23 +113,27 @@ class DocumentChunk(Base):
     )
 
     # ── Content ────────────────────────────────────────────────────────────────
-    chunk_index   = Column(Integer, nullable=False)         # order within document
-    content       = Column(Text, nullable=False)             # section-prefixed → embedding
-    raw_content   = Column(Text, nullable=True)              # plain body → BM25
+    chunk_index    = Column(Integer, nullable=False)    # order within document
+    content        = Column(Text, nullable=False)        # section-prefixed → embedding
+    raw_content    = Column(Text, nullable=True)         # plain body → BM25
+    overlap_prefix = Column(Text, nullable=True)         # trailing text from previous chunk (sliding window)
 
     # ── Location ──────────────────────────────────────────────────────────────
     page_start    = Column(Integer,     nullable=True)
     page_end      = Column(Integer,     nullable=True)
-    section_title = Column(String(500), nullable=True)       # e.g. "ARTICLE IX – TERMINATION"
-    chunk_type    = Column(String(50),  default="text")      # text | table | header
+    char_start    = Column(Integer,     nullable=True)   # byte offset into OCR full_text
+    char_end      = Column(Integer,     nullable=True)   # byte offset into OCR full_text
+    section_title = Column(String(500), nullable=True)   # e.g. "ARTICLE IX – TERMINATION"
+    section_depth = Column(Integer,     nullable=True, default=0)  # 0=article, 1=section, 2=subsection
+    chunk_type    = Column(String(50),  default="text")  # text | table | header | definition
 
     # ── Embedding ─────────────────────────────────────────────────────────────
-    embedding_id  = Column(String(100), nullable=True)       # ChromaDB document ID
+    embedding_id  = Column(String(100), nullable=True)   # ChromaDB document ID
     is_embedded   = Column(Boolean, default=False)
 
     # ── Stats ─────────────────────────────────────────────────────────────────
-    token_count   = Column(Integer, nullable=True)
-    ocr_confidence = Column(Float,  nullable=True)           # per-chunk if needed
+    token_count    = Column(Integer, nullable=True)
+    ocr_confidence = Column(Float,   nullable=True)      # per-chunk if needed
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

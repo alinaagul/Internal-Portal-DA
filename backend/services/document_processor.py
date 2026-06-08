@@ -84,15 +84,19 @@ class DocumentProcessor:
             db_chunks = []
             for chunk in chunks:
                 db_chunk = DocumentChunk(
-                    document_id   = document_id,
-                    chunk_index   = chunk.chunk_index,
-                    content       = chunk.content,
-                    raw_content   = chunk.raw_content,
-                    page_start    = chunk.page_start,
-                    page_end      = chunk.page_end,
-                    section_title = chunk.section_title,
-                    chunk_type    = chunk.chunk_type,
-                    token_count   = chunk.token_count,
+                    document_id    = document_id,
+                    chunk_index    = chunk.chunk_index,
+                    content        = chunk.content,
+                    raw_content    = chunk.raw_content,
+                    overlap_prefix = getattr(chunk, "overlap_prefix", ""),
+                    page_start     = chunk.page_start,
+                    page_end       = chunk.page_end,
+                    char_start     = getattr(chunk, "char_start", None),
+                    char_end       = getattr(chunk, "char_end", None),
+                    section_title  = chunk.section_title,
+                    section_depth  = getattr(chunk, "section_depth", 0),
+                    chunk_type     = chunk.chunk_type,
+                    token_count    = chunk.token_count,
                 )
                 db.add(db_chunk)
                 db_chunks.append(db_chunk)

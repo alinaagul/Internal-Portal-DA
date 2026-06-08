@@ -148,13 +148,15 @@ class ChatService:
         query_type = self._classify(query)
         logger.info(f"[Chat] Query type: {query_type}")
 
-        # ── Step 2: Hybrid retrieval (Vector + BM25 + MMR) ────────────────
+        # ── Step 2: Hybrid retrieval (Vector + BM25Plus + MMR + Reranker) ──────
         chunks = embedding_service.search(
             document_id        = session.document_id,
             query              = query,
             top_k              = 6,
             use_mmr            = True,
             use_query_expansion= use_query_expansion,
+            use_reranker       = True,
+            query_type         = query_type,   # passed so MMR lambda is query-aware
         )
 
         if not chunks:
@@ -190,10 +192,12 @@ class ChatService:
             "query_type":    query_type,
             "hybrid_scores": [
                 {
-                    "section": c["metadata"].get("section_title", ""),
-                    "hybrid":  c.get("hybrid_score", 0),
-                    "vector":  c.get("relevance_score", 0),
-                    "bm25":    c.get("bm25_score", 0),
+                    "section":  c["metadata"].get("section_title", ""),
+                    "hybrid":   c.get("hybrid_score", 0),
+                    "vector":   c.get("relevance_score", 0),
+                    "bm25":     c.get("bm25_score", 0),
+                    "mmr":      c.get("mmr_score", 0),
+                    "rerank":   c.get("rerank_score", 0),   # cross-encoder score
                 }
                 for c in chunks
             ],
