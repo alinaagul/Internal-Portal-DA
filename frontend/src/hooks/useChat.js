@@ -72,8 +72,11 @@ export function useChat() {
     }
   }, [activeSession]);
 
-  const sendMessage = useCallback(async (content, documentId = null) => {
-    if (!activeSession || !content.trim()) return;
+  // explicitSessionId bypasses the stale-closure problem when sendMessage is called
+  // immediately after createSession (before React has re-rendered with the new activeSession).
+  const sendMessage = useCallback(async (content, documentId = null, explicitSessionId = null) => {
+    const sessionId = explicitSessionId ?? activeSession?.id;
+    if (!sessionId || !content.trim()) return;
     setSending(true);
 
     // Optimistic user message
@@ -81,23 +84,30 @@ export function useChat() {
     setMessages((prev) => [...prev, tempMsg]);
 
     try {
-      const { data } = await chatApi.sendMessage(activeSession.id, {
-        message:     content,
-        document_id: documentId,
-      });
+      const payload = { message: content };
+      // Only include document_id when explicitly provided — omitting it lets the
+      // backend fall back to the session's stored document_id.
+      // Sending null explicitly means "no document / general chat".
+      if (documentId !== undefined) payload.document_id = documentId;
 
-      // Replace temp + add assistant reply
+      const { data } = await chatApi.sendMessage(sessionId, payload);
+
+      // Replace optimistic message with confirmed one, then append assistant reply
       setMessages((prev) => [
         ...prev.filter((m) => m.id !== tempMsg.id),
-        { ...tempMsg, id: tempMsg.id },
+        { ...tempMsg },
         data.message,
       ]);
 
-      // Update session preview
+      // Update session preview in sidebar
       setSessions((prev) =>
         prev.map((s) =>
-          s.id === activeSession.id
-            ? { ...s, message_count: s.message_count + 2, last_message: data.message.content.slice(0, 100) }
+          s.id === sessionId
+            ? {
+                ...s,
+                message_count: (s.message_count || 0) + 2,
+                last_message: data.message?.content?.slice(0, 100) ?? "",
+              }
             : s
         )
       );

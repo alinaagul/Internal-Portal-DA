@@ -24,3 +24,5 @@ typing-extensions>=4.14.1
 celery==5.3.6
 redis==5.0.3
 rank-bm25
+sentence-transformers
+pymupdf

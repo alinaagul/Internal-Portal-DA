@@ -14,10 +14,13 @@ export default function ChatPage() {
   const { user } = useAuth();
   const location = useLocation();
   const {
-    sessions, activeSession, messages, sending, loading,
+    sessions, activeSession, messages, sending, loading, error: chatError,
     fetchSessions, openSession, createSession, updateTitle, deleteSession, sendMessage,
   } = useChat();
-  const { documents, fetchDocuments } = useDocuments();
+  const {
+    documents, loading: docsLoading, error: docsError,
+    fetchDocuments,
+  } = useDocuments();
 
   const [input, setInput]                   = useState("");
   const [selectedDoc, setSelectedDoc]       = useState(null);
@@ -25,43 +28,68 @@ export default function ChatPage() {
   const [titleInput, setTitleInput]         = useState("");
   const [showDocPicker, setShowDocPicker]   = useState(false);
   const [hoveredSession, setHoveredSession] = useState(null);
-  const bottomRef = useRef();
+  const bottomRef  = useRef();
+  const pickerRef  = useRef();
 
+  // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
     fetchSessions();
     fetchDocuments();
   }, []);
 
+  // ── Pre-select document when navigated from Documents page ────────────────
   useEffect(() => {
-    if (location.state?.documentId && documents.length > 0) {
-      const doc = documents.find((d) => d.id === location.state.documentId);
-      if (doc) setSelectedDoc(doc);
-    }
+    if (!location.state?.documentId || documents.length === 0) return;
+    const doc = documents.find((d) => d.id === location.state.documentId);
+    if (doc) setSelectedDoc(doc);
   }, [location.state, documents]);
 
+  // ── Sync selectedDoc when user switches to an existing session (Bug 3) ───
+  useEffect(() => {
+    if (!activeSession) return;
+    if (activeSession.document_id) {
+      const doc = documents.find((d) => d.id === activeSession.document_id);
+      setSelectedDoc(doc ?? null);
+    } else {
+      setSelectedDoc(null);
+    }
+  }, [activeSession?.id]);   // only re-run when the session itself changes, not on every doc list update
+
+  // ── Auto-scroll to latest message ────────────────────────────────────────
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Close doc picker on outside click
+  // ── Close doc picker on outside click (Bug 1 fix: use 'click', not 'mousedown') ──
   useEffect(() => {
     if (!showDocPicker) return;
-    const handler = () => setShowDocPicker(false);
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    const handler = (e) => {
+      // pickerRef wraps the entire picker widget; clicks inside it should not close it
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setShowDocPicker(false);
+      }
+    };
+    // Use 'click' (fires after mouseup) so item onClick handlers run before the dropdown closes
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
   }, [showDocPicker]);
 
   const readyDocs = documents.filter((d) => d.status === "ready");
 
+  // ── Send message ──────────────────────────────────────────────────────────
   const handleSend = async () => {
     if (!input.trim() || sending) return;
     const text = input.trim();
+    const docId = selectedDoc?.id ?? null;
     setInput("");
+
     if (!activeSession) {
-      const session = await createSession(selectedDoc?.id || null);
-      if (session) await sendMessage(text, selectedDoc?.id || null);
+      // Bug 2 fix: createSession returns the new session object; pass its id
+      // directly to sendMessage so the stale-closure activeSession check is bypassed.
+      const session = await createSession(docId);
+      if (session) await sendMessage(text, docId, session.id);
     } else {
-      await sendMessage(text, selectedDoc?.id || null);
+      await sendMessage(text, docId);
     }
   };
 
@@ -74,16 +102,33 @@ export default function ChatPage() {
     setEditingTitle(null);
   };
 
+  const handleSelectDoc = (doc) => {
+    setSelectedDoc(doc);
+    setShowDocPicker(false);
+  };
+
+  const handleClearDoc = () => {
+    setSelectedDoc(null);
+    setShowDocPicker(false);
+  };
+
   const formatTime = (iso) => {
     if (!iso) return "";
     return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
+
+  const docPickerLabel = selectedDoc
+    ? getDocShort(selectedDoc, 22)
+    : docsLoading
+    ? "Loading documents…"
+    : "No document selected";
 
   return (
     <div style={s.page}>
       <style>{`
         @keyframes bounce3 { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
         @keyframes fadeIn   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes spin     { to{transform:rotate(360deg)} }
       `}</style>
 
       {/* ── Sessions Sidebar ── */}
@@ -93,7 +138,7 @@ export default function ChatPage() {
           <button
             style={s.newBtn}
             title="New chat"
-            onClick={() => createSession(selectedDoc?.id || null)}
+            onClick={() => createSession(selectedDoc?.id ?? null)}
           >
             <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
               <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -101,175 +146,246 @@ export default function ChatPage() {
           </button>
         </div>
 
-        {/* Document context for new chats */}
-        <div style={s.docSelectorWrap} onClick={(e) => e.stopPropagation()}>
+        {/* ── Document picker (Bug 1 fix: ref-based outside-click, click event) ── */}
+        <div style={s.docSelectorWrap} ref={pickerRef}>
           <button
-            style={s.docSelectorBtn}
-            onClick={() => setShowDocPicker(!showDocPicker)}
+            style={{
+              ...s.docSelectorBtn,
+              borderColor: selectedDoc ? "#bfdbfe" : "#e2e8f0",
+              background:  selectedDoc ? "#eff6ff" : "#f8fafc",
+              color:       selectedDoc ? "#1d4ed8" : "#64748b",
+            }}
+            onClick={() => setShowDocPicker((v) => !v)}
+            disabled={docsLoading}
           >
-            <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
-              <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
-                stroke="currentColor" strokeWidth="1.7" />
-            </svg>
-            <span style={s.docSelectorLabel}>
-              {selectedDoc ? getDocShort(selectedDoc, 22) : "No document selected"}
-            </span>
-            <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
+            {docsLoading ? (
+              <span style={{ animation: "spin 1s linear infinite", display: "inline-block", fontSize: "12px" }}>⟳</span>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
+                <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
+                  stroke="currentColor" strokeWidth="1.7" />
+              </svg>
+            )}
+            <span style={s.docSelectorLabel}>{docPickerLabel}</span>
+            <svg width="9" height="9" viewBox="0 0 12 12" fill="none"
+              style={{ transform: showDocPicker ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
               <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </button>
 
           {showDocPicker && (
             <div style={s.dropdown}>
+              {/* General chat option */}
               <div
                 style={{ ...s.dropItem, ...(selectedDoc === null ? s.dropItemActive : {}) }}
-                onClick={() => { setSelectedDoc(null); setShowDocPicker(false); }}
+                onClick={handleClearDoc}
               >
                 <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
                   <path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H6l-4 4V4z"
                     stroke="#64748b" strokeWidth="1.7" />
                 </svg>
-                <span style={{ flex: 1 }}>General chat</span>
-                {!selectedDoc && <span style={s.checkMark}>✓</span>}
+                <span style={{ flex: 1 }}>General chat (no document)</span>
+                {selectedDoc === null && <span style={s.checkMark}>✓</span>}
               </div>
 
-              {readyDocs.length === 0 && (
-                <div style={s.dropDisabled}>No ready documents</div>
+              <div style={s.dropDivider} />
+
+              {docsError && (
+                <div style={s.dropError}>⚠ {docsError}</div>
               )}
 
-              {readyDocs.map((d) => (
-                <div
-                  key={d.id}
-                  style={{ ...s.dropItem, ...(selectedDoc?.id === d.id ? s.dropItemActive : {}) }}
-                  onClick={() => { setSelectedDoc(d); setShowDocPicker(false); }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
-                    <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
-                      stroke="#2563eb" strokeWidth="1.7" />
-                  </svg>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: "#0f172a", fontSize: "12px", fontWeight: "500",
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {getDocName(d)}
-                    </div>
-                    {d.ocr?.total_pages && (
-                      <div style={{ color: "#94a3b8", fontSize: "10px" }}>{d.ocr.total_pages} pages</div>
-                    )}
-                  </div>
-                  {selectedDoc?.id === d.id && <span style={s.checkMark}>✓</span>}
+              {!docsLoading && readyDocs.length === 0 && (
+                <div style={s.dropDisabled}>
+                  No ready documents. Upload and process a PDF first.
                 </div>
-              ))}
+              )}
+
+              {docsLoading && (
+                <div style={s.dropDisabled}>
+                  <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span>
+                  {" "}Loading…
+                </div>
+              )}
+
+              {readyDocs.map((d) => {
+                const isActive = selectedDoc?.id === d.id;
+                return (
+                  <div
+                    key={d.id}
+                    style={{ ...s.dropItem, ...(isActive ? s.dropItemActive : {}) }}
+                    onClick={() => handleSelectDoc(d)}
+                  >
+                    <div style={{
+                      ...s.dropDocIcon,
+                      background: isActive ? "#dbeafe" : "#f1f5f9",
+                    }}>
+                      <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+                        <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
+                          stroke={isActive ? "#2563eb" : "#64748b"} strokeWidth="1.7" />
+                        <path d="M12 2v4h4" stroke={isActive ? "#2563eb" : "#64748b"} strokeWidth="1.4" />
+                      </svg>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        color: isActive ? "#1d4ed8" : "#0f172a",
+                        fontSize: "12px", fontWeight: "500",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {getDocName(d)}
+                      </div>
+                      <div style={{ color: "#94a3b8", fontSize: "10px", marginTop: "1px" }}>
+                        {[
+                          d.ocr?.total_pages && `${d.ocr.total_pages} pages`,
+                          d.chunking?.total_chunks && `${d.chunking.total_chunks} chunks`,
+                        ].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
+                    {isActive && <span style={s.checkMark}>✓</span>}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
 
+        {/* ── Session list ── */}
         <div style={s.sessionList}>
-          {sessions.length === 0 && (
-            <div style={s.noSessions}>No conversations yet.<br />Type a message to start.</div>
+          {sessions.length === 0 && !loading && (
+            <div style={s.noSessions}>
+              No conversations yet.<br />Type a message to start.
+            </div>
           )}
 
-          {sessions.map((sess) => (
-            <div
-              key={sess.id}
-              style={{
-                ...s.sessionItem,
-                ...(activeSession?.id === sess.id ? s.sessionActive : {}),
-                background: activeSession?.id === sess.id
-                  ? "#eff6ff"
-                  : hoveredSession === sess.id ? "#f8fafc" : "transparent",
-              }}
-              onClick={() => openSession(sess.id)}
-              onMouseEnter={() => setHoveredSession(sess.id)}
-              onMouseLeave={() => setHoveredSession(null)}
-            >
-              {editingTitle === sess.id ? (
-                <input
-                  style={s.titleInput}
-                  value={titleInput}
-                  autoFocus
-                  onChange={(e) => setTitleInput(e.target.value)}
-                  onBlur={() => handleTitleSave(sess.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter")  handleTitleSave(sess.id);
-                    if (e.key === "Escape") setEditingTitle(null);
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <>
-                  <div style={s.sessRow}>
-                    <svg width="11" height="11" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
-                      <path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H6l-4 4V4z"
-                        stroke={activeSession?.id === sess.id ? "#2563eb" : "#94a3b8"}
-                        strokeWidth="1.7" strokeLinejoin="round" />
-                    </svg>
-                    <span style={s.sessTitle}>{sess.title || "New Chat"}</span>
-                    <div style={{
-                      ...s.sessActions,
-                      opacity: hoveredSession === sess.id || activeSession?.id === sess.id ? 1 : 0,
-                    }}>
-                      <button
-                        style={s.iconBtn}
-                        title="Rename"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingTitle(sess.id);
-                          setTitleInput(sess.title || "");
-                        }}
-                      >
-                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                          <path d="M11 2l3 3-8 8H3v-3l8-8z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
-                        </svg>
-                      </button>
-                      <button
-                        style={{ ...s.iconBtn, color: "#ef4444" }}
-                        title="Delete"
-                        onClick={(e) => { e.stopPropagation(); deleteSession(sess.id); }}
-                      >
-                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                          <path d="M3 4h10M6 2h4M5 4l.5 9h5l.5-9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                  {sess.document_id && (
-                    <div style={s.sessDoc}>
-                      📄 {readyDocs.find((d) => d.id === sess.document_id)
-                        ? getDocShort(readyDocs.find((d) => d.id === sess.document_id), 24)
-                        : "Document"}
-                    </div>
-                  )}
-                  {sess.message_count > 0 && (
-                    <div style={s.sessMeta}>{sess.message_count} msg{sess.message_count > 1 ? "s" : ""}</div>
-                  )}
-                </>
-              )}
+          {loading && sessions.length === 0 && (
+            <div style={s.noSessions}>
+              <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span>
+              {" "}Loading…
             </div>
-          ))}
+          )}
+
+          {sessions.map((sess) => {
+            const isActive = activeSession?.id === sess.id;
+            const isHovered = hoveredSession === sess.id;
+            const sessDoc = readyDocs.find((d) => d.id === sess.document_id);
+            return (
+              <div
+                key={sess.id}
+                style={{
+                  ...s.sessionItem,
+                  ...(isActive ? s.sessionActive : {}),
+                  background: isActive ? "#eff6ff" : isHovered ? "#f8fafc" : "transparent",
+                }}
+                onClick={() => openSession(sess.id)}
+                onMouseEnter={() => setHoveredSession(sess.id)}
+                onMouseLeave={() => setHoveredSession(null)}
+              >
+                {editingTitle === sess.id ? (
+                  <input
+                    style={s.titleInput}
+                    value={titleInput}
+                    autoFocus
+                    onChange={(e) => setTitleInput(e.target.value)}
+                    onBlur={() => handleTitleSave(sess.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter")  handleTitleSave(sess.id);
+                      if (e.key === "Escape") setEditingTitle(null);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <>
+                    <div style={s.sessRow}>
+                      <svg width="11" height="11" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
+                        <path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H6l-4 4V4z"
+                          stroke={isActive ? "#2563eb" : "#94a3b8"}
+                          strokeWidth="1.7" strokeLinejoin="round" />
+                      </svg>
+                      <span style={s.sessTitle}>{sess.title || "New Chat"}</span>
+                      <div style={{ ...s.sessActions, opacity: isHovered || isActive ? 1 : 0 }}>
+                        <button
+                          style={s.iconBtn}
+                          title="Rename"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTitle(sess.id);
+                            setTitleInput(sess.title || "");
+                          }}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                            <path d="M11 2l3 3-8 8H3v-3l8-8z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                        <button
+                          style={{ ...s.iconBtn, color: "#ef4444" }}
+                          title="Delete"
+                          onClick={(e) => { e.stopPropagation(); deleteSession(sess.id); }}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                            <path d="M3 4h10M6 2h4M5 4l.5 9h5l.5-9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                    {sessDoc && (
+                      <div style={s.sessDoc} title={getDocName(sessDoc)}>
+                        📄 {getDocShort(sessDoc, 24)}
+                      </div>
+                    )}
+                    {sess.message_count > 0 && (
+                      <div style={s.sessMeta}>
+                        {sess.message_count} msg{sess.message_count > 1 ? "s" : ""}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       </aside>
 
       {/* ── Chat Area ── */}
       <div style={s.chatArea}>
 
-        {/* Document context banner */}
-        {selectedDoc && (
+        {/* Selected document banner */}
+        {selectedDoc ? (
           <div style={s.docBanner}>
             <div style={s.bannerLeft}>
-              <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
-                <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
-                  stroke="#2563eb" strokeWidth="1.7" />
-              </svg>
+              <div style={s.bannerIconWrap}>
+                <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
+                  <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
+                    stroke="#2563eb" strokeWidth="1.7" />
+                </svg>
+              </div>
               <span style={s.bannerMode}>RAG mode</span>
-              <span style={s.bannerDoc}>— {getDocName(selectedDoc)}</span>
+              <span style={s.bannerSep}>·</span>
+              <span style={s.bannerDoc}>{getDocName(selectedDoc)}</span>
             </div>
-            <button style={s.bannerClear} onClick={() => setSelectedDoc(null)}>✕ Clear</button>
+            <button style={s.bannerClear} onClick={handleClearDoc}>
+              ✕ Clear
+            </button>
           </div>
+        ) : (
+          <div style={s.generalBanner}>
+            <span style={s.generalBannerText}>
+              General chat mode — select a document in the sidebar to enable RAG
+            </span>
+            {readyDocs.length > 0 && (
+              <button style={s.generalBannerBtn} onClick={() => setShowDocPicker(true)}>
+                Select document
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Error banner */}
+        {chatError && (
+          <div style={s.errorBanner}>{chatError}</div>
         )}
 
         {/* Messages */}
         <div style={s.messages}>
-          {messages.length === 0 && (
+          {messages.length === 0 && !sending && (
             <div style={s.welcome}>
               <div style={s.welcomeIcon}>
                 <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
@@ -284,13 +400,17 @@ export default function ChatPage() {
               </h3>
               <p style={s.welcomeSub}>
                 {selectedDoc
-                  ? "I'll search through the document and give you accurate, sourced answers."
+                  ? "I'll retrieve the most relevant sections and give you accurate, sourced answers."
                   : "Select a document from the sidebar for grounded, RAG-powered answers."}
               </p>
               {!selectedDoc && readyDocs.length > 0 && (
-                <p style={s.welcomeHint}>
-                  💡 {readyDocs.length} document{readyDocs.length > 1 ? "s" : ""} ready — pick one in the sidebar for RAG mode
-                </p>
+                <button style={s.welcomeDocBtn} onClick={() => setShowDocPicker(true)}>
+                  <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
+                    <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
+                      stroke="currentColor" strokeWidth="1.7" />
+                  </svg>
+                  Select a document ({readyDocs.length} ready)
+                </button>
               )}
             </div>
           )}
@@ -314,15 +434,27 @@ export default function ChatPage() {
                   {msg.sources && msg.sources.length > 0 && (
                     <div style={s.sources}>
                       <div style={s.sourcesTitle}>Sources</div>
-                      {msg.sources.map((src, si) => (
-                        <div key={si} style={s.sourceItem}>
-                          <span style={s.srcBadge}>p.{src.page_number}</span>
-                          <span style={s.srcSection}>{src.section_title}</span>
-                          {src.score && (
-                            <span style={s.srcScore}>{Math.round(src.score * 100)}%</span>
-                          )}
-                        </div>
-                      ))}
+                      {msg.sources.map((src, si) => {
+                        // sources can be strings ("Section — Page X") or structured objects
+                        const isStr = typeof src === "string";
+                        return (
+                          <div key={si} style={s.sourceItem}>
+                            {isStr ? (
+                              <span style={s.srcSection}>{src}</span>
+                            ) : (
+                              <>
+                                {src.page_number != null && (
+                                  <span style={s.srcBadge}>p.{src.page_number}</span>
+                                )}
+                                <span style={s.srcSection}>{src.section_title}</span>
+                                {src.score != null && (
+                                  <span style={s.srcScore}>{Math.round(src.score * 100)}%</span>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -351,12 +483,25 @@ export default function ChatPage() {
 
         {/* Input bar */}
         <div style={s.inputBar}>
+          {/* Compact doc indicator inside input bar */}
+          {selectedDoc && (
+            <div style={s.inputDocChip}>
+              <svg width="10" height="10" viewBox="0 0 20 20" fill="none">
+                <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"
+                  stroke="#2563eb" strokeWidth="1.7" />
+              </svg>
+              <span>{getDocShort(selectedDoc, 28)}</span>
+              <button style={s.chipClear} onClick={handleClearDoc} title="Clear document">✕</button>
+            </div>
+          )}
           <div style={s.inputRow}>
             <textarea
               style={s.textarea}
-              placeholder={selectedDoc
-                ? `Ask about "${getDocShort(selectedDoc, 24)}"…`
-                : "Type a message…"}
+              placeholder={
+                selectedDoc
+                  ? `Ask about "${getDocShort(selectedDoc, 24)}"…`
+                  : "Type a message… (select a document above for RAG mode)"
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -366,6 +511,7 @@ export default function ChatPage() {
               style={{ ...s.sendBtn, opacity: (!input.trim() || sending) ? 0.4 : 1 }}
               onClick={handleSend}
               disabled={!input.trim() || sending}
+              title="Send (Enter)"
             >
               <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
                 <path d="M3 10l14-7-5 7 5 7-14-7z" fill="white" />
@@ -373,8 +519,8 @@ export default function ChatPage() {
             </button>
           </div>
           <div style={s.inputHint}>
-            Enter to send · Shift+Enter for new line
-            {selectedDoc ? " · RAG mode" : " · General mode"}
+            Enter to send · Shift+Enter for new line ·{" "}
+            {selectedDoc ? <strong style={{ color: "#2563eb" }}>RAG mode</strong> : "General mode"}
           </div>
         </div>
       </div>
@@ -382,6 +528,7 @@ export default function ChatPage() {
   );
 }
 
+/* ─── styles ─────────────────────────────────────────────────────────────── */
 const s = {
   page: {
     display: "flex",
@@ -393,8 +540,8 @@ const s = {
 
   /* Sessions sidebar */
   sidebar: {
-    width: "240px",
-    minWidth: "240px",
+    width: "250px",
+    minWidth: "250px",
     borderRight: "1px solid #e2e8f0",
     display: "flex",
     flexDirection: "column",
@@ -406,7 +553,7 @@ const s = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "14px 14px 8px",
+    padding: "14px 14px 10px",
     borderBottom: "1px solid #f1f5f9",
   },
   sideTitle: {
@@ -428,8 +575,10 @@ const s = {
     alignItems: "center",
     justifyContent: "center",
   },
+
+  /* Document picker */
   docSelectorWrap: {
-    padding: "8px 10px",
+    padding: "8px 10px 6px",
     borderBottom: "1px solid #f1f5f9",
     position: "relative",
   },
@@ -438,15 +587,14 @@ const s = {
     alignItems: "center",
     gap: "6px",
     width: "100%",
-    background: "#f8fafc",
     border: "1px solid #e2e8f0",
-    borderRadius: "7px",
-    padding: "7px 10px",
+    borderRadius: "8px",
+    padding: "8px 10px",
     fontSize: "11px",
-    color: "#64748b",
     cursor: "pointer",
     fontFamily: "inherit",
     textAlign: "left",
+    transition: "background 0.1s, border-color 0.1s",
   },
   docSelectorLabel: {
     flex: 1,
@@ -456,33 +604,45 @@ const s = {
   },
   dropdown: {
     position: "absolute",
-    top: "calc(100% - 4px)",
+    top: "calc(100% + 2px)",
     left: "10px",
     right: "10px",
     background: "#fff",
     border: "1px solid #e2e8f0",
     borderRadius: "10px",
     padding: "6px",
-    zIndex: 200,
-    boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-    maxHeight: "220px",
+    zIndex: 300,
+    boxShadow: "0 8px 30px rgba(0,0,0,0.14)",
+    maxHeight: "240px",
     overflowY: "auto",
   },
+  dropDivider: { height: "1px", background: "#f1f5f9", margin: "4px 0" },
   dropItem: {
     display: "flex",
     alignItems: "center",
     gap: "8px",
     padding: "8px 9px",
-    borderRadius: "6px",
+    borderRadius: "7px",
     cursor: "pointer",
     color: "#374151",
     fontSize: "12px",
-    transition: "background 0.1s",
+    userSelect: "none",
   },
   dropItemActive: { background: "#eff6ff", color: "#1d4ed8" },
-  dropDisabled: { padding: "8px 9px", color: "#94a3b8", fontSize: "11px" },
-  checkMark: { color: "#2563eb", fontSize: "12px", fontWeight: "700", marginLeft: "auto" },
+  dropDocIcon: {
+    width: "26px",
+    height: "26px",
+    borderRadius: "6px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  dropDisabled: { padding: "8px 9px", color: "#94a3b8", fontSize: "11px", lineHeight: "1.5" },
+  dropError:   { padding: "8px 9px", color: "#dc2626", fontSize: "11px" },
+  checkMark: { color: "#2563eb", fontSize: "12px", fontWeight: "700", marginLeft: "auto", flexShrink: 0 },
 
+  /* Session list */
   sessionList: { flex: 1, overflowY: "auto", padding: "6px 8px" },
   noSessions: { color: "#94a3b8", fontSize: "12px", textAlign: "center", padding: "24px 12px", lineHeight: "1.7" },
   sessionItem: {
@@ -522,6 +682,8 @@ const s = {
     background: "#f8fafc",
     minWidth: 0,
   },
+
+  /* Document banner (active RAG mode) */
   docBanner: {
     display: "flex",
     alignItems: "center",
@@ -530,19 +692,57 @@ const s = {
     borderBottom: "1px solid #bfdbfe",
     padding: "8px 20px",
     flexShrink: 0,
+    gap: "12px",
   },
-  bannerLeft: { display: "flex", alignItems: "center", gap: "7px" },
-  bannerMode: { color: "#1d4ed8", fontSize: "12px", fontWeight: "700" },
-  bannerDoc: { color: "#3b82f6", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "300px" },
-  bannerClear: { background: "transparent", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: "12px", fontFamily: "inherit" },
+  bannerLeft: { display: "flex", alignItems: "center", gap: "8px", minWidth: 0 },
+  bannerIconWrap: {
+    width: "24px", height: "24px", background: "#dbeafe", borderRadius: "6px",
+    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+  },
+  bannerMode: { color: "#1d4ed8", fontSize: "12px", fontWeight: "700", flexShrink: 0 },
+  bannerSep: { color: "#93c5fd", fontSize: "12px", flexShrink: 0 },
+  bannerDoc: {
+    color: "#3b82f6", fontSize: "12px",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  bannerClear: {
+    background: "transparent", border: "1px solid #bfdbfe", color: "#3b82f6",
+    borderRadius: "6px", cursor: "pointer", fontSize: "11px", fontFamily: "inherit",
+    padding: "3px 9px", flexShrink: 0,
+  },
 
+  /* General chat banner */
+  generalBanner: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    background: "#f8fafc",
+    borderBottom: "1px solid #e2e8f0",
+    padding: "7px 20px",
+    flexShrink: 0,
+    gap: "12px",
+  },
+  generalBannerText: { color: "#94a3b8", fontSize: "11px" },
+  generalBannerBtn: {
+    background: "#fff", border: "1px solid #e2e8f0", color: "#374151",
+    borderRadius: "6px", padding: "4px 10px", fontSize: "11px",
+    cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
+  },
+
+  /* Error banner */
+  errorBanner: {
+    background: "#fef2f2", borderBottom: "1px solid #fecaca",
+    color: "#dc2626", padding: "8px 20px", fontSize: "12px", flexShrink: 0,
+  },
+
+  /* Messages */
   messages: {
     flex: 1, overflowY: "auto", padding: "20px 24px",
     display: "flex", flexDirection: "column", gap: "14px",
   },
   welcome: {
     margin: "auto", textAlign: "center", maxWidth: "460px", padding: "40px 20px",
-    display: "flex", flexDirection: "column", alignItems: "center", gap: "12px",
+    display: "flex", flexDirection: "column", alignItems: "center", gap: "14px",
   },
   welcomeIcon: {
     width: "60px", height: "60px", background: "#eff6ff",
@@ -551,10 +751,12 @@ const s = {
   },
   welcomeTitle: { color: "#0f172a", fontSize: "19px", fontWeight: "700", margin: 0, letterSpacing: "-0.4px" },
   welcomeSub: { color: "#64748b", fontSize: "14px", margin: 0, lineHeight: "1.65" },
-  welcomeHint: {
-    color: "#2563eb", fontSize: "13px",
-    background: "#eff6ff", border: "1px solid #bfdbfe",
-    borderRadius: "8px", padding: "10px 14px", margin: 0,
+  welcomeDocBtn: {
+    display: "flex", alignItems: "center", gap: "7px",
+    background: "#eff6ff", color: "#2563eb",
+    border: "1px solid #bfdbfe", borderRadius: "8px",
+    padding: "9px 16px", fontSize: "13px", fontWeight: "600",
+    cursor: "pointer", fontFamily: "inherit",
   },
 
   msgRow: { display: "flex", justifyContent: "flex-start" },
@@ -576,7 +778,26 @@ const s = {
   typing: { display: "flex", gap: "4px", padding: "4px 2px", alignItems: "center" },
   dot3: { width: "7px", height: "7px", background: "#cbd5e1", borderRadius: "50%", display: "inline-block", animation: "bounce3 1.2s infinite" },
 
-  inputBar: { borderTop: "1px solid #e2e8f0", padding: "14px 20px", background: "#fff", flexShrink: 0 },
+  /* Input bar */
+  inputBar: { borderTop: "1px solid #e2e8f0", padding: "10px 20px 14px", background: "#fff", flexShrink: 0 },
+  inputDocChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    color: "#1d4ed8",
+    borderRadius: "6px",
+    padding: "3px 8px",
+    fontSize: "11px",
+    fontWeight: "500",
+    marginBottom: "8px",
+  },
+  chipClear: {
+    background: "none", border: "none", cursor: "pointer",
+    color: "#93c5fd", fontSize: "11px", padding: "0 0 0 2px",
+    lineHeight: 1,
+  },
   inputRow: { display: "flex", gap: "9px", alignItems: "flex-end" },
   textarea: {
     flex: 1, background: "#f8fafc", border: "1px solid #e2e8f0",
@@ -590,5 +811,5 @@ const s = {
     display: "flex", alignItems: "center", justifyContent: "center",
     flexShrink: 0, transition: "opacity 0.15s",
   },
-  inputHint: { color: "#94a3b8", fontSize: "11px", marginTop: "6px", textAlign: "center" },
+  inputHint: { color: "#94a3b8", fontSize: "11px", marginTop: "6px" },
 };
