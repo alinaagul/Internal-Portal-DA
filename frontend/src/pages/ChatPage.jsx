@@ -10,6 +10,74 @@ const getDocShort = (d, max = 30) => {
   return n.length > max ? n.slice(0, max) + "…" : n;
 };
 
+// Simple markdown renderer — handles bold, bullets, numbered lists, headings
+function renderMarkdown(text) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Heading
+    const hMatch = line.match(/^(#{1,3})\s+(.+)/);
+    if (hMatch) {
+      const level = hMatch[1].length;
+      const sz = level === 1 ? "16px" : level === 2 ? "14px" : "13px";
+      out.push(
+        <div key={i} style={{ fontWeight: "700", fontSize: sz, color: "#0f172a", marginTop: "10px", marginBottom: "4px" }}>
+          {inlineMd(hMatch[2])}
+        </div>
+      );
+      i++; continue;
+    }
+    // Bullet
+    const bMatch = line.match(/^[\-\*]\s+(.*)/);
+    if (bMatch) {
+      out.push(
+        <div key={i} style={{ display: "flex", gap: "6px", marginBottom: "3px" }}>
+          <span style={{ color: "#2563eb", flexShrink: 0, marginTop: "1px" }}>•</span>
+          <span>{inlineMd(bMatch[1])}</span>
+        </div>
+      );
+      i++; continue;
+    }
+    // Numbered list
+    const nMatch = line.match(/^(\d+)\.\s+(.*)/);
+    if (nMatch) {
+      out.push(
+        <div key={i} style={{ display: "flex", gap: "6px", marginBottom: "3px" }}>
+          <span style={{ color: "#2563eb", flexShrink: 0, fontWeight: "600", minWidth: "16px" }}>{nMatch[1]}.</span>
+          <span>{inlineMd(nMatch[2])}</span>
+        </div>
+      );
+      i++; continue;
+    }
+    // Empty line → spacer
+    if (line.trim() === "") {
+      if (out.length > 0) out.push(<div key={i} style={{ height: "6px" }} />);
+      i++; continue;
+    }
+    // Normal paragraph
+    out.push(<div key={i} style={{ marginBottom: "2px" }}>{inlineMd(line)}</div>);
+    i++;
+  }
+  return out;
+}
+
+function inlineMd(text) {
+  // Split on **bold** and (SOURCE X, ...) citation patterns
+  const parts = text.split(/(\*\*[^*]+\*\*|\([^)]*SOURCE[^)]*\))/g);
+  return parts.map((part, idx) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={idx} style={{ fontWeight: "700", color: "#0f172a" }}>{part.slice(2, -2)}</strong>;
+    }
+    if (/^\([^)]*SOURCE[^)]*\)$/.test(part)) {
+      return <span key={idx} style={{ color: "#2563eb", fontSize: "11px", fontWeight: "600" }}>{part}</span>;
+    }
+    return part;
+  });
+}
+
 export default function ChatPage() {
   const { user } = useAuth();
   const location = useLocation();
@@ -428,35 +496,9 @@ export default function ChatPage() {
                     {isUser ? "You" : "DocAssist"}
                   </div>
                   <div style={{ ...s.msgContent, color: isUser ? "#fff" : "#0f172a" }}>
-                    {msg.content}
+                    {isUser ? msg.content : renderMarkdown(msg.content)}
                   </div>
 
-                  {msg.sources && msg.sources.length > 0 && (
-                    <div style={s.sources}>
-                      <div style={s.sourcesTitle}>Sources</div>
-                      {msg.sources.map((src, si) => {
-                        // sources can be strings ("Section — Page X") or structured objects
-                        const isStr = typeof src === "string";
-                        return (
-                          <div key={si} style={s.sourceItem}>
-                            {isStr ? (
-                              <span style={s.srcSection}>{src}</span>
-                            ) : (
-                              <>
-                                {src.page_number != null && (
-                                  <span style={s.srcBadge}>p.{src.page_number}</span>
-                                )}
-                                <span style={s.srcSection}>{src.section_title}</span>
-                                {src.score != null && (
-                                  <span style={s.srcScore}>{Math.round(src.score * 100)}%</span>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
 
                   <div style={{ ...s.msgTime, color: isUser ? "rgba(255,255,255,0.35)" : "#cbd5e1" }}>
                     {formatTime(msg.created_at)}
@@ -769,11 +811,14 @@ const s = {
   msgTime: { fontSize: "10px", marginTop: "7px", textAlign: "right" },
 
   sources: { marginTop: "10px", padding: "10px 12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" },
-  sourcesTitle: { color: "#64748b", fontSize: "10px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "7px" },
-  sourceItem: { display: "flex", alignItems: "center", gap: "7px", marginBottom: "5px" },
+  sourcesTitle: {
+    color: "#64748b", fontSize: "10px", fontWeight: "700", textTransform: "uppercase",
+    letterSpacing: "0.5px", marginBottom: "8px", display: "flex", alignItems: "center",
+  },
+  sourceItem: { display: "flex", alignItems: "center", gap: "6px", marginBottom: "5px", minWidth: 0 },
+  srcLeft: { display: "flex", gap: "4px", flexShrink: 0 },
   srcBadge: { background: "#f0fdf4", border: "1px solid #86efac", color: "#16a34a", borderRadius: "4px", padding: "1px 6px", fontSize: "10px", fontWeight: "600", flexShrink: 0 },
   srcSection: { color: "#374151", fontSize: "11px", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  srcScore: { color: "#94a3b8", fontSize: "10px", flexShrink: 0 },
 
   typing: { display: "flex", gap: "4px", padding: "4px 2px", alignItems: "center" },
   dot3: { width: "7px", height: "7px", background: "#cbd5e1", borderRadius: "50%", display: "inline-block", animation: "bounce3 1.2s infinite" },

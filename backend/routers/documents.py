@@ -12,6 +12,7 @@ from core.deps import get_current_user
 from db.database import get_db
 from model.user import User
 from model.document import Document, DocumentChunk
+from model.chat import ChatSession, ChatMessage
 from model.document_schemas import (
     DocumentUploadResponse,
     DocumentStatusResponse,
@@ -212,8 +213,15 @@ def delete_document(
     if file_path.exists():
         file_path.unlink()
 
-    # 3. Remove DB rows
-    db.query(DocumentChunk).filter(DocumentChunk.document_id == document_id).delete()
+    # 3. Remove DB rows — delete dependents first to satisfy FK constraints
+    session_ids = [
+        r[0] for r in
+        db.query(ChatSession.id).filter(ChatSession.document_id == document_id).all()
+    ]
+    if session_ids:
+        db.query(ChatMessage).filter(ChatMessage.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(ChatSession).filter(ChatSession.id.in_(session_ids)).delete(synchronize_session=False)
+    db.query(DocumentChunk).filter(DocumentChunk.document_id == document_id).delete(synchronize_session=False)
     db.delete(doc)
     db.commit()
 
