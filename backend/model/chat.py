@@ -18,6 +18,9 @@ class ChatSession(Base):
     message_count = Column(Integer, default=0)
     last_message  = Column(Text,    nullable=True)   # preview of last message
 
+    # Memory management: running summary of older messages outside the rolling window
+    context_summary = Column(Text, nullable=True)
+
     created_at  = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at  = Column(DateTime,
                          default=lambda:  datetime.now(timezone.utc),

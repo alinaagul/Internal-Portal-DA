@@ -67,6 +67,7 @@ class ChatSession:
     user_id: int
     messages: List[Message] = field(default_factory=list)
     total_queries: int = 0
+    context_summary: str = ""  # compressed summary of older messages outside rolling window
 
     def add_user(self, content: str):
         self.messages.append(Message(role="user", content=content))
@@ -80,14 +81,16 @@ class ChatSession:
     def get_history(self, max_messages: int = 8, max_tokens: int = 3000) -> List[Message]:
         """
         Rolling window — last N messages within token budget.
-        CHANGED: max_messages 10→8, max_tokens 4000→3000 to leave more room
-        for retrieved clauses in Mistral's 8K context.
+        When a context_summary exists, the budget is tighter (2000 tokens) to
+        leave room for the summary text in the prompt.
         """
+        # Reserve token budget for summary if one exists
+        effective_tokens = 2000 if self.context_summary else max_tokens
         recent = self.messages[-max_messages:]
         budget, selected = 0, []
         for msg in reversed(recent):
             t = len(msg.content) // 4
-            if budget + t > max_tokens:
+            if budget + t > effective_tokens:
                 break
             selected.append(msg)
             budget += t
@@ -157,7 +160,7 @@ class ChatService:
             logger.info(f"[Chat] Low top score ({top_score:.1f}) — using cautious prompt")
 
         history  = session.get_history()
-        prompt   = self._build_prompt(query, query_type, chunks, history, low_confidence)
+        prompt   = self._build_prompt(query, query_type, chunks, history, low_confidence, session.context_summary)
         raw_answer = self._generate(prompt, temperature=0.1)
 
         # Completeness check: re-prompt if answer is too brief for non-factual queries
@@ -205,6 +208,31 @@ class ChatService:
 
     # ── Prompt construction ───────────────────────────────────────────────────
 
+    def summarize_history(self, messages: List[Message]) -> str:
+        """
+        Compress a list of older messages into a concise context note.
+        Called when a session grows past the rolling-window threshold so earlier
+        context isn't silently dropped.
+        """
+        if not messages:
+            return ""
+        history_text = "\n".join(
+            f"{'User' if m.role == 'user' else 'Assistant'}: {m.content[:400]}"
+            for m in messages
+        )
+        prompt = (
+            "Summarize the following Q&A conversation into a concise context note "
+            "(max 150 words). Capture: key topics discussed, facts established, "
+            "document sections referenced, and important conclusions reached.\n\n"
+            f"CONVERSATION:\n{history_text}\n\n"
+            "SUMMARY:"
+        )
+        try:
+            return self._generate(prompt, temperature=0.0)
+        except Exception:
+            logger.warning("[Chat] summarize_history failed — skipping")
+            return ""
+
     def _build_prompt(
         self,
         query: str,
@@ -212,6 +240,7 @@ class ChatService:
         chunks: List[dict],
         history: List[Message],
         low_confidence: bool = False,
+        context_summary: str = "",
     ) -> str:
         """
         IMPROVED: clause_text now separates section label from content so the
@@ -265,6 +294,11 @@ class ChatService:
             if low_confidence else ""
         )
 
+        summary_section = (
+            f"\nEARLIER CONVERSATION SUMMARY:\n{context_summary}\n"
+            if context_summary else ""
+        )
+
         return f"""You are a legal contract analysis AI specialising in Power Purchase Agreements (PPAs).
 
 INSTRUCTIONS:
@@ -275,8 +309,8 @@ INSTRUCTIONS:
 {confidence_note}
 CONTRACT CLAUSES:
 {clause_text}
-
-CONVERSATION HISTORY:
+{summary_section}
+RECENT CONVERSATION:
 {history_text or "(none)"}
 
 USER QUESTION:

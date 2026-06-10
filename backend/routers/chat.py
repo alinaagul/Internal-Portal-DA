@@ -162,6 +162,7 @@ def send_message(
         session_id=str(session_id),
         document_id=doc_id,
         user_id=current_user.id,
+        context_summary=db_session.context_summary or "",
     )
     # Populate history (exclude the message we just added)
     for row in history_rows[:-1]:
