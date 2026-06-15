@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { useDocuments } from "../hooks/useDocuments";
-import DocumentUpload from "../components/DocumentUpload";
+import { Navigate, useNavigate } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth.jsx";
+import { isAdmin } from "../utils/auth";
+import { useUserCollections } from "../hooks/useCollections";
 import StatusModal from "../components/StatusModal";
 
 const getDocName = (d) => d?.original_filename || d?.filename || "Untitled";
@@ -42,7 +43,7 @@ function StatusBadge({ status }) {
   );
 }
 
-function DocRow({ doc, active, onView, onChat, onStatus, onDelete }) {
+function DocRow({ doc, active, onView, onChat, onStatus, onDelete, canDelete = true }) {
   const [hovering, setHovering] = useState(false);
   const name = getDocName(doc);
 
@@ -137,18 +138,20 @@ function DocRow({ doc, active, onView, onChat, onStatus, onDelete }) {
           </button>
         )}
 
-        <button style={{ ...s.actionBtn, ...s.actionBtnDanger }} onClick={onDelete} title="Delete">
-          <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
-            <path d="M6 2h8M3 5h14M8 9v6M12 9v6M4 5l1 13h10L16 5"
-              stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        {canDelete && (
+          <button style={{ ...s.actionBtn, ...s.actionBtnDanger }} onClick={onDelete} title="Delete">
+            <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+              <path d="M6 2h8M3 5h14M8 9v6M12 9v6M4 5l1 13h10L16 5"
+                stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-function DetailPanel({ doc, onClose, onChat, onDelete, onRefresh, onStatus }) {
+function DetailPanel({ doc, onClose, onChat, onDelete, onRefresh, onStatus, canDelete = true }) {
   const name = getDocName(doc);
 
   return (
@@ -287,195 +290,119 @@ function DetailPanel({ doc, onClose, onChat, onDelete, onRefresh, onStatus }) {
               Full Status
             </button>
           </div>
-          <button style={s.deleteAction} onClick={onDelete}>
-            <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
-              <path d="M6 2h8M3 5h14M8 9v6M12 9v6M4 5l1 13h10L16 5"
-                stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Delete Document
-          </button>
+          {canDelete && (
+            <button style={s.deleteAction} onClick={onDelete}>
+              <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
+                <path d="M6 2h8M3 5h14M8 9v6M12 9v6M4 5l1 13h10L16 5"
+                  stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Delete Document
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-export default function DocumentsPage() {
+function UserCollectionsView() {
   const navigate = useNavigate();
-  const {
-    documents, uploading, uploadProgress,
-    loading, error, setError,
-    fetchDocuments, uploadDocument, deleteDocument,
-  } = useDocuments();
-
-  const [showUpload, setShowUpload] = useState(false);
+  const { collections, loading, error, fetchCollections, startPolling, stopPolling } = useUserCollections();
   const [viewDoc, setViewDoc] = useState(null);
   const [statusDoc, setStatusDoc] = useState(null);
 
-  useEffect(() => { fetchDocuments(); }, []);
-
-  // Keep viewDoc in sync with latest document data (for live status updates)
   useEffect(() => {
-    if (viewDoc) {
-      const updated = documents.find((d) => d.id === viewDoc.id);
-      if (updated) setViewDoc(updated);
-    }
-  }, [documents]);
+    fetchCollections();
+    startPolling();
+    return () => stopPolling();
+  }, []);
+
+  const allDocs = collections.flatMap((c) =>
+    (c.documents || []).map((d) => ({ ...d, collection_name: c.name }))
+  );
 
   const handleChatWithDoc = (doc) => {
     navigate("/chat", { state: { documentId: doc.id, documentName: getDocName(doc) } });
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Delete this document? This cannot be undone.")) return;
-    await deleteDocument(id);
-    if (viewDoc?.id === id) setViewDoc(null);
-  };
-
-  const readyCount = documents.filter((d) => d.status === "ready").length;
-  const processingCount = documents.filter(
-    (d) => d.status === "processing" || d.status === "uploaded"
-  ).length;
-
   return (
     <div style={s.page}>
-      <style>{`
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
-        @keyframes spin   { to{transform:rotate(360deg)} }
-      `}</style>
-
-      {/* Page header */}
       <div style={s.pageHeader}>
         <div>
-          <h1 style={s.pageTitle}>Documents</h1>
+          <h1 style={s.pageTitle}>My Collections</h1>
           <p style={s.pageSubtitle}>
-            {loading && documents.length === 0
+            {loading && collections.length === 0
               ? "Loading…"
-              : documents.length === 0
-              ? "No documents yet — upload a PDF to get started"
-              : `${documents.length} document${documents.length !== 1 ? "s" : ""} · ${readyCount} ready${processingCount > 0 ? ` · ${processingCount} processing` : ""}`}
+              : collections.length === 0
+              ? "No collections assigned yet — contact your administrator"
+              : `${collections.length} collection${collections.length !== 1 ? "s" : ""} · ${allDocs.length} document${allDocs.length !== 1 ? "s" : ""}`}
           </p>
         </div>
-        <button
-          style={{ ...s.uploadToggleBtn, ...(showUpload ? s.uploadToggleBtnActive : {}) }}
-          onClick={() => setShowUpload(!showUpload)}
-        >
-          <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-            {showUpload ? (
-              <path d="M4 4l12 12M16 4L4 16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            ) : (
-              <>
-                <path d="M10 3v10M6 7l4-4 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M3 16v1h14v-1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              </>
-            )}
-          </svg>
-          {showUpload ? "Cancel" : "Upload PDF"}
-        </button>
       </div>
 
-      {/* Upload drawer */}
-      {showUpload && (
-        <div style={s.uploadDrawer}>
-          <div style={s.uploadDrawerInner}>
-            <DocumentUpload
-              onUpload={async (file) => {
-                const result = await uploadDocument(file);
-                if (result?.success) setShowUpload(false);
-              }}
-              uploading={uploading}
-              uploadProgress={uploadProgress}
-            />
-            {error && (
-              <div style={s.errorBanner}>
-                <span>{error}</span>
-                <button style={s.errorClose} onClick={() => setError(null)}>✕</button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Main area */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-
-        {/* Document list */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-
-          {/* Table header */}
-          {documents.length > 0 && (
-            <div style={s.tableHeader}>
-              <div style={{ flex: "1 1 0", color: "#64748b", fontSize: "11px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>Document</div>
-              <div style={{ width: "110px", color: "#64748b", fontSize: "11px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>Date</div>
-              <div style={{ width: "70px",  color: "#64748b", fontSize: "11px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>Pages</div>
-              <div style={{ width: "120px", color: "#64748b", fontSize: "11px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>Status</div>
-              <div style={{ width: "186px", color: "#64748b", fontSize: "11px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px", textAlign: "right" }}>Actions</div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 0 24px" }}>
+          {error && <div style={{ ...s.errorBanner, margin: "16px 28px 0" }}>{error}</div>}
+          {loading && collections.length === 0 ? (
+            <div style={s.emptyState}><span style={s.emptyText}>Loading collections…</span></div>
+          ) : collections.length === 0 ? (
+            <div style={s.emptyState}>
+              <div style={s.emptyTitle}>No collections assigned</div>
+              <div style={s.emptyText}>Your admin will assign document collections to your account.</div>
             </div>
-          )}
-
-          {/* Rows */}
-          <div style={{ flex: 1, overflowY: "auto" }}>
-            {loading && documents.length === 0 ? (
-              <div style={s.emptyState}>
-                <div style={{ fontSize: "28px", animation: "spin 1s linear infinite", color: "#94a3b8" }}>⟳</div>
-                <span style={s.emptyText}>Loading your documents…</span>
-              </div>
-            ) : documents.length === 0 ? (
-              <div style={s.emptyState}>
-                <div style={s.emptyIllustration}>
-                  <svg width="48" height="48" viewBox="0 0 60 60" fill="none">
-                    <rect x="10" y="5" width="40" height="50" rx="5" stroke="#cbd5e1" strokeWidth="2" />
-                    <path d="M38 5v10h12" stroke="#cbd5e1" strokeWidth="2" strokeLinejoin="round" />
-                    <path d="M18 24h24M18 32h18M18 40h12" stroke="#cbd5e1" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
+          ) : (
+            collections.map((coll) => (
+              <div key={coll.id} style={{ marginBottom: "8px" }}>
+                <div style={{
+                  padding: "14px 28px", background: "#fff", borderBottom: "1px solid #e2e8f0",
+                  borderTop: "1px solid #e2e8f0", position: "sticky", top: 0, zIndex: 1,
+                }}>
+                  <div style={{ color: "#0f172a", fontSize: "14px", fontWeight: "700" }}>{coll.name}</div>
+                  <div style={{ color: "#94a3b8", fontSize: "12px", marginTop: "2px" }}>
+                    {coll.documents?.length || 0} documents · Updated {formatDate(coll.updated_at)}
+                  </div>
                 </div>
-                <div style={s.emptyTitle}>No documents yet</div>
-                <div style={s.emptyText}>Upload a PDF to start using AI-powered document chat</div>
-                <button style={s.emptyCta} onClick={() => setShowUpload(true)}>
-                  <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
-                    <path d="M10 3v10M6 7l4-4 4 4M3 16v1h14v-1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Upload your first PDF
-                </button>
+                {(coll.documents || []).length === 0 ? (
+                  <div style={{ padding: "16px 28px", color: "#94a3b8", fontSize: "13px" }}>No documents in this collection yet.</div>
+                ) : (
+                  coll.documents.map((doc) => (
+                    <DocRow
+                      key={doc.id}
+                      doc={doc}
+                      active={viewDoc?.id === doc.id}
+                      onView={() => setViewDoc(viewDoc?.id === doc.id ? null : doc)}
+                      onChat={() => handleChatWithDoc(doc)}
+                      onStatus={() => setStatusDoc(doc)}
+                      onDelete={() => {}}
+                      canDelete={false}
+                    />
+                  ))
+                )}
               </div>
-            ) : (
-              documents.map((doc) => (
-                <DocRow
-                  key={doc.id}
-                  doc={doc}
-                  active={viewDoc?.id === doc.id}
-                  onView={() => setViewDoc(viewDoc?.id === doc.id ? null : doc)}
-                  onChat={() => handleChatWithDoc(doc)}
-                  onStatus={() => setStatusDoc(doc)}
-                  onDelete={() => handleDelete(doc.id)}
-                />
-              ))
-            )}
-          </div>
+            ))
+          )}
         </div>
-
-        {/* Detail panel */}
         {viewDoc && (
           <DetailPanel
             doc={viewDoc}
             onClose={() => setViewDoc(null)}
             onChat={() => handleChatWithDoc(viewDoc)}
-            onDelete={() => handleDelete(viewDoc.id)}
-            onRefresh={fetchDocuments}
+            onDelete={() => {}}
+            onRefresh={fetchCollections}
             onStatus={() => setStatusDoc(viewDoc)}
+            canDelete={false}
           />
         )}
       </div>
-
-      {/* Status modal */}
-      {statusDoc && (
-        <StatusModal
-          doc={statusDoc}
-          onClose={() => setStatusDoc(null)}
-        />
-      )}
+      {statusDoc && <StatusModal doc={statusDoc} onClose={() => setStatusDoc(null)} />}
     </div>
   );
+}
+
+export default function DocumentsPage() {
+  const { user } = useAuth();
+  if (isAdmin(user)) return <Navigate to="/admin/collections" replace />;
+  return <UserCollectionsView />;
 }
 
 /* ─── styles ── */
