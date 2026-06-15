@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.jsx";
-import { useUserCollections } from "../hooks/useCollections";
+import { useDocuments } from "../hooks/useDocuments";
 
 const getDocName = (d) => d?.original_filename || d?.filename || "Untitled";
 const getDocShort = (d, max = 36) => {
@@ -37,15 +37,9 @@ function StatusBadge({ status }) {
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { collections, loading, fetchCollections, startPolling, stopPolling } = useUserCollections();
+  const { documents, loading, fetchDocuments } = useDocuments();
 
-  useEffect(() => {
-    fetchCollections();
-    startPolling();
-    return () => stopPolling();
-  }, []);
-
-  const documents = collections.flatMap((c) => c.documents || []);
+  useEffect(() => { fetchDocuments(); }, []);
 
   const readyDocs     = documents.filter((d) => d.status === "ready");
   const processingDocs = documents.filter((d) => d.status === "processing" || d.status === "uploaded");
@@ -109,8 +103,8 @@ export default function Dashboard() {
                   <path d="M3 16v1h14v-1" stroke="#2563eb" strokeWidth="1.6" strokeLinecap="round" />
                 </svg>
               </div>
-              <div style={s.actionLabel}>View Collections</div>
-              <div style={s.actionSub}>Browse documents assigned to you</div>
+              <div style={s.actionLabel}>Upload Document</div>
+              <div style={s.actionSub}>Add a new PDF to process</div>
             </button>
 
             <button
@@ -126,7 +120,7 @@ export default function Dashboard() {
               </div>
               <div style={{ ...s.actionLabel, color: readyDocs.length > 0 ? "#0f172a" : "#94a3b8" }}>Start Chat</div>
               <div style={s.actionSub}>
-                {readyDocs.length > 0 ? `${readyDocs.length} document${readyDocs.length > 1 ? "s" : ""} ready` : "No ready documents yet"}
+                {readyDocs.length > 0 ? `${readyDocs.length} document${readyDocs.length > 1 ? "s" : ""} ready` : "Upload a document first"}
               </div>
             </button>
 
@@ -213,10 +207,10 @@ export default function Dashboard() {
               <path d="M38 5v10h12" stroke="#cbd5e1" strokeWidth="2" strokeLinejoin="round" />
               <path d="M18 24h24M18 32h18M18 40h12" stroke="#cbd5e1" strokeWidth="2" strokeLinecap="round" />
             </svg>
-            <div style={s.emptyTitle}>No collections assigned</div>
-            <div style={s.emptyText}>Your administrator will assign document collections to your account.</div>
+            <div style={s.emptyTitle}>No documents yet</div>
+            <div style={s.emptyText}>Upload your first PDF to get started with AI-powered document chat.</div>
             <button style={s.emptyBtn} onClick={() => navigate("/documents")}>
-              View collections →
+              Upload a PDF →
             </button>
           </div>
         )}
