@@ -122,6 +122,12 @@ def process_document(self, document_id: int, file_path: str) -> dict:
             f"low_conf_pages={doc.pages_with_low_confidence}"
         )
 
+        # OCR can take many minutes — SQL Server drops idle connections.
+        # Reopen the session now so we start with a fresh, verified connection.
+        db.close()
+        db = SessionLocal()
+        doc = db.query(Document).filter(Document.id == document_id).first()
+
         self.update_state(state="PROGRESS", meta={
             "step": "ocr", "progress": 35,
             "message": f"OCR done — {ocr_result.total_pages} pages extracted"
@@ -327,6 +333,10 @@ def process_document(self, document_id: int, file_path: str) -> dict:
         # Don't retry — file is gone
         log(task_id, document_id, "ERROR", str(e), level="error")
         if db:
+            try:
+                db.rollback()
+            except Exception:
+                pass
             doc = db.query(Document).filter(Document.id == document_id).first()
             if doc:
                 set_status(doc, "failed", db, error=str(e))
@@ -335,9 +345,27 @@ def process_document(self, document_id: int, file_path: str) -> dict:
     except Exception as e:
         log(task_id, document_id, "ERROR", f"Pipeline failed: {e}", level="error")
         if db:
-            doc = db.query(Document).filter(Document.id == document_id).first()
-            if doc:
-                set_status(doc, "failed", db, error=str(e)[:500])
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            try:
+                doc = db.query(Document).filter(Document.id == document_id).first()
+                if doc:
+                    set_status(doc, "failed", db, error=str(e)[:500])
+            except Exception:
+                # Session is unrecoverable — open a fresh one just to mark failure
+                try:
+                    db.close()
+                except Exception:
+                    pass
+                db = SessionLocal()
+                try:
+                    doc = db.query(Document).filter(Document.id == document_id).first()
+                    if doc:
+                        set_status(doc, "failed", db, error=str(e)[:500])
+                except Exception:
+                    pass
         raise
 
     finally:
