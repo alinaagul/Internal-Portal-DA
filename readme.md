@@ -13,3 +13,12 @@ https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata (ENGLISH)
 cd frontend
 npm install
 npm run dev             # → http://localhost:5173
+
+
+cd backend
+celery -A celery_app worker --loglevel=info --pool=solo
+
+
+check that redis working. https://github.com/microsoftarchive/redis/releases
+
+

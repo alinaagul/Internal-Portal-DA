@@ -22,7 +22,8 @@ from celery import Task
 from celery.utils.log import get_task_logger
 from celery_app.celery_config import celery_app
 from db.database import SessionLocal
-from models.document import Document, DocumentChunk
+import model  # noqa: F401 — ensures all models (User, Document, Chat) are registered with SQLAlchemy
+from model.document import Document, DocumentChunk
 from services.ocr_service import ocr_service
 from services.chunking_service import chunking_service
 from services.embedding_service import embedding_service
@@ -106,8 +107,8 @@ def process_document(self, document_id: int, file_path: str) -> dict:
         doc.ocr_confidence            = round(ocr_result.avg_confidence, 2)
         doc.language_detected         = ocr_result.language
         doc.ocr_method                = ocr_result.extraction_method
-        doc.pages_with_tables         = sum(1 for p in ocr_result.pages if p.has_tables)
-        doc.pages_with_low_confidence = sum(1 for p in ocr_result.pages if p.confidence < 50)
+        doc.pages_with_tables         = ocr_result.pages_with_tables
+        doc.pages_with_low_confidence = ocr_result.pages_with_low_confidence
         db.commit()
 
         ocr_time = time.time() - t0
@@ -160,15 +161,19 @@ def process_document(self, document_id: int, file_path: str) -> dict:
         db_chunks = []
         for chunk in chunks:
             db_chunk = DocumentChunk(
-                document_id   = document_id,
-                chunk_index   = chunk.chunk_index,
-                content       = chunk.content,
-                raw_content   = chunk.raw_content,
-                page_start    = chunk.page_start,
-                page_end      = chunk.page_end,
-                section_title = chunk.section_title,
-                chunk_type    = chunk.chunk_type,
-                token_count   = chunk.token_count,
+                document_id    = document_id,
+                chunk_index    = chunk.chunk_index,
+                content        = chunk.content,
+                raw_content    = chunk.raw_content,
+                overlap_prefix = chunk.overlap_prefix,
+                page_start     = chunk.page_start,
+                page_end       = chunk.page_end,
+                char_start     = chunk.char_start,
+                char_end       = chunk.char_end,
+                section_title  = chunk.section_title,
+                section_depth  = chunk.section_depth,
+                chunk_type     = chunk.chunk_type,
+                token_count    = chunk.token_count,
             )
             db.add(db_chunk)
             db_chunks.append(db_chunk)
@@ -268,11 +273,13 @@ def process_document(self, document_id: int, file_path: str) -> dict:
                     "message":  f"Embedding chunk {min(i+batch_size, total)}/{total}..."
                 })
 
-            # Mark embedded chunks in DB
-            for c in db_chunks:
-                c.is_embedded  = True
-                c.embedding_id = f"doc{document_id}_chunk{c.chunk_index}"
-            db.commit()
+            # Mark embedded chunks in DB — commit in batches to avoid TCP timeout
+            _BATCH = 50
+            for i in range(0, len(db_chunks), _BATCH):
+                for c in db_chunks[i:i + _BATCH]:
+                    c.is_embedded  = True
+                    c.embedding_id = f"doc{document_id}_chunk{c.chunk_index}"
+                db.commit()
 
             doc.embedded_chunk_count = success_all
             doc.failed_embed_count   = failed_all
@@ -334,4 +341,7 @@ def process_document(self, document_id: int, file_path: str) -> dict:
         raise
 
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception:
+            pass
