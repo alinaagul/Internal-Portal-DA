@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.jsx";
-import { getDashboardPath } from "../utils/auth";
 
 export default function AuthPage() {
-  const [form, setForm] = useState({ email: "", password: "" });
-  const { login, loading, error, setError } = useAuth();
+  const [mode, setMode] = useState("login");
+  const [form, setForm] = useState({ full_name: "", email: "", password: "" });
+  const { login, signup, loading, error, setError } = useAuth();
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -15,13 +15,23 @@ export default function AuthPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const result = await login(form.email, form.password);
-    if (result.success) navigate(getDashboardPath(result.user.role));
+    const result =
+      mode === "login"
+        ? await login(form.email, form.password)
+        : await signup(form.full_name, form.email, form.password);
+    if (result.success) navigate("/dashboard");
+  };
+
+  const switchMode = () => {
+    setError(null);
+    setForm({ full_name: "", email: "", password: "" });
+    setMode((m) => (m === "login" ? "signup" : "login"));
   };
 
   return (
     <div style={s.page}>
       <div style={s.card}>
+        {/* Brand */}
         <div style={s.brand}>
           <div style={s.logoBox}>
             <svg width="18" height="18" viewBox="0 0 28 28" fill="none">
@@ -31,10 +41,20 @@ export default function AuthPage() {
           <span style={s.brandName}>DocAssist</span>
         </div>
 
-        <h1 style={s.title}>Sign in</h1>
-        <p style={s.sub}>Welcome back. Admins and users sign in here.</p>
+        <h1 style={s.title}>{mode === "login" ? "Sign in" : "Create account"}</h1>
+        <p style={s.sub}>
+          {mode === "login" ? "Welcome back to your workspace" : "Start your document intelligence journey"}
+        </p>
 
         <form onSubmit={handleSubmit} style={s.form}>
+          {mode === "signup" && (
+            <div style={s.field}>
+              <label style={s.label}>Full name</label>
+              <input style={s.input} name="full_name" type="text"
+                placeholder="Ahmed Khan" value={form.full_name}
+                onChange={handleChange} required />
+            </div>
+          )}
           <div style={s.field}>
             <label style={s.label}>Email</label>
             <input style={s.input} name="email" type="email"
@@ -51,16 +71,15 @@ export default function AuthPage() {
           {error && <div style={s.errorBox}>{error}</div>}
 
           <button type="submit" style={s.btn} disabled={loading}>
-            {loading ? "Please wait…" : "Sign in"}
+            {loading ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
           </button>
         </form>
 
         <p style={s.switchText}>
-          Need an admin account?{" "}
-          <Link to="/admin/signup" style={s.link}>Admin Signup</Link>
-        </p>
-        <p style={s.note}>
-          Regular users cannot sign up. Contact your administrator for an account.
+          {mode === "login" ? "Don't have an account? " : "Already have an account? "}
+          <span style={s.link} onClick={switchMode}>
+            {mode === "login" ? "Sign up" : "Sign in"}
+          </span>
         </p>
       </div>
     </div>
@@ -93,6 +112,5 @@ const s = {
     marginTop:"2px", fontFamily:"inherit" },
   switchText: { color:"#64748b", fontSize:"13px", textAlign:"center",
     marginTop:"20px", marginBottom:0 },
-  link: { color:"#2563eb", fontWeight:"500", textDecoration:"none" },
-  note: { color:"#94a3b8", fontSize:"12px", textAlign:"center", marginTop:"12px", lineHeight:"1.5" },
+  link: { color:"#2563eb", cursor:"pointer", fontWeight:"500" },
 };
