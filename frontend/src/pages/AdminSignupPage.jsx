@@ -3,9 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.jsx";
 import { getDashboardPath } from "../utils/auth";
 
-export default function AuthPage() {
-  const [form, setForm] = useState({ email: "", password: "" });
-  const { login, loading, error, setError } = useAuth();
+export default function AdminSignupPage() {
+  const [form, setForm] = useState({
+    full_name: "",
+    email: "",
+    password: "",
+    signup_secret: "",
+  });
+  const { adminSignup, loading, error, setError } = useAuth();
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -15,8 +20,8 @@ export default function AuthPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const result = await login(form.email, form.password);
-    if (result.success) navigate(getDashboardPath(result.user.role));
+    const result = await adminSignup(form);
+    if (result.success) navigate(getDashboardPath("admin"));
   };
 
   return (
@@ -31,14 +36,23 @@ export default function AuthPage() {
           <span style={s.brandName}>DocAssist</span>
         </div>
 
-        <h1 style={s.title}>Sign in</h1>
-        <p style={s.sub}>Welcome back. Admins and users sign in here.</p>
+        <div style={s.badge}>Administrator</div>
+        <h1 style={s.title}>Admin Signup</h1>
+        <p style={s.sub}>
+          Create an administrator account. Regular users cannot sign up — admins create their accounts.
+        </p>
 
         <form onSubmit={handleSubmit} style={s.form}>
           <div style={s.field}>
+            <label style={s.label}>Full name</label>
+            <input style={s.input} name="full_name" type="text"
+              placeholder="Admin name" value={form.full_name}
+              onChange={handleChange} required />
+          </div>
+          <div style={s.field}>
             <label style={s.label}>Email</label>
             <input style={s.input} name="email" type="email"
-              placeholder="you@example.com" value={form.email}
+              placeholder="admin@example.com" value={form.email}
               onChange={handleChange} required />
           </div>
           <div style={s.field}>
@@ -47,20 +61,24 @@ export default function AuthPage() {
               placeholder="••••••••" value={form.password}
               onChange={handleChange} required />
           </div>
+          <div style={s.field}>
+            <label style={s.label}>Admin signup secret (if required)</label>
+            <input style={s.input} name="signup_secret" type="password"
+              placeholder="Only needed after the first admin exists"
+              value={form.signup_secret}
+              onChange={handleChange} />
+          </div>
 
           {error && <div style={s.errorBox}>{error}</div>}
 
           <button type="submit" style={s.btn} disabled={loading}>
-            {loading ? "Please wait…" : "Sign in"}
+            {loading ? "Please wait…" : "Create admin account"}
           </button>
         </form>
 
         <p style={s.switchText}>
-          Need an admin account?{" "}
-          <Link to="/admin/signup" style={s.link}>Admin Signup</Link>
-        </p>
-        <p style={s.note}>
-          Regular users cannot sign up. Contact your administrator for an account.
+          Already have an account?{" "}
+          <Link to="/login" style={s.link}>Sign in</Link>
         </p>
       </div>
     </div>
@@ -73,13 +91,16 @@ const s = {
   card: { background:"#fff", border:"1px solid #e2e8f0", borderRadius:"16px",
     padding:"44px 40px", width:"100%", maxWidth:"400px",
     boxShadow:"0 4px 24px rgba(0,0,0,0.06)" },
-  brand: { display:"flex", alignItems:"center", gap:"9px", marginBottom:"28px" },
+  brand: { display:"flex", alignItems:"center", gap:"9px", marginBottom:"20px" },
   logoBox: { width:"34px", height:"34px", background:"#eff6ff", border:"1px solid #bfdbfe",
     borderRadius:"8px", display:"flex", alignItems:"center", justifyContent:"center" },
   brandName: { color:"#0f172a", fontSize:"16px", fontWeight:"700", letterSpacing:"-0.3px" },
+  badge: { display:"inline-block", background:"#eff6ff", color:"#1d4ed8",
+    fontSize:"11px", fontWeight:"700", textTransform:"uppercase", letterSpacing:"0.6px",
+    padding:"4px 10px", borderRadius:"20px", marginBottom:"12px" },
   title: { color:"#0f172a", fontSize:"22px", fontWeight:"700", margin:"0 0 4px",
     letterSpacing:"-0.5px" },
-  sub: { color:"#64748b", fontSize:"13px", margin:"0 0 24px" },
+  sub: { color:"#64748b", fontSize:"13px", margin:"0 0 24px", lineHeight:"1.5" },
   form: { display:"flex", flexDirection:"column", gap:"16px" },
   field: { display:"flex", flexDirection:"column", gap:"5px" },
   label: { color:"#374151", fontSize:"13px", fontWeight:"500" },
@@ -94,5 +115,4 @@ const s = {
   switchText: { color:"#64748b", fontSize:"13px", textAlign:"center",
     marginTop:"20px", marginBottom:0 },
   link: { color:"#2563eb", fontWeight:"500", textDecoration:"none" },
-  note: { color:"#94a3b8", fontSize:"12px", textAlign:"center", marginTop:"12px", lineHeight:"1.5" },
 };

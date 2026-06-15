@@ -1,7 +1,6 @@
 import { useState, useCallback, useContext, createContext } from "react";
 import { authApi } from "../api/auth";
 
-// ── Shared Auth Context ───────────────────────────────────────────────────────
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
@@ -20,6 +19,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem("access_token", data.access_token);
     localStorage.setItem("user", JSON.stringify(data.user));
     setUser(data.user);
+    return data.user;
   };
 
   const login = useCallback(async (email, password) => {
@@ -27,8 +27,8 @@ export function AuthProvider({ children }) {
     setError(null);
     try {
       const { data } = await authApi.login({ email, password });
-      saveSession(data);
-      return { success: true };
+      const loggedInUser = saveSession(data);
+      return { success: true, user: loggedInUser };
     } catch (err) {
       const msg = err.response?.data?.detail || "Login failed";
       setError(msg);
@@ -38,15 +38,17 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const signup = useCallback(async (full_name, email, password) => {
+  const adminSignup = useCallback(async ({ full_name, email, password, signup_secret }) => {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await authApi.signup({ full_name, email, password });
-      saveSession(data);
-      return { success: true };
+      const payload = { full_name, email, password };
+      if (signup_secret) payload.signup_secret = signup_secret;
+      const { data } = await authApi.adminSignup(payload);
+      const newUser = saveSession(data);
+      return { success: true, user: newUser };
     } catch (err) {
-      const msg = err.response?.data?.detail || "Signup failed";
+      const msg = err.response?.data?.detail || "Admin signup failed";
       setError(msg);
       return { success: false, error: msg };
     } finally {
@@ -61,13 +63,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, error, login, signup, logout, setError }}>
+    <AuthContext.Provider value={{ user, loading, error, login, adminSignup, logout, setError }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-// ── Hook ──────────────────────────────────────────────────────────────────────
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");

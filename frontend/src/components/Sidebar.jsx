@@ -1,7 +1,8 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.jsx";
+import { isAdmin } from "../utils/auth";
 
-const NAV = [
+const USER_NAV = [
   {
     path: "/dashboard",
     label: "Dashboard",
@@ -16,7 +17,7 @@ const NAV = [
   },
   {
     path: "/documents",
-    label: "Documents",
+    label: "My Collections",
     icon: (c) => (
       <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
         <path d="M4 2h8l4 4v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke={c} strokeWidth="1.7" />
@@ -41,10 +42,36 @@ const NAV = [
   },
 ];
 
+const ADMIN_NAV = [
+  {
+    path: "/admin/dashboard",
+    label: "Admin Dashboard",
+    icon: (c) => (
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+        <path d="M3 10h14M10 3v14" stroke={c} strokeWidth="1.6" strokeLinecap="round" />
+        <rect x="2" y="2" width="16" height="16" rx="3" stroke={c} strokeWidth="1.6" />
+      </svg>
+    ),
+  },
+  {
+    path: "/admin/collections",
+    label: "Collections",
+    icon: (c) => (
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+        <path d="M3 6a2 2 0 012-2h3l1 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V6z" stroke={c} strokeWidth="1.7" />
+        <path d="M3 8h14" stroke={c} strokeWidth="1.4" />
+      </svg>
+    ),
+  },
+  ...USER_NAV.filter((item) => item.path !== "/dashboard" && item.path !== "/documents"),
+];
+
 export default function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const navItems = isAdmin(user) ? ADMIN_NAV : USER_NAV;
+  const roleLabel = user?.role === "admin" ? "Administrator" : "User";
 
   const handleLogout = () => {
     logout();
@@ -53,7 +80,6 @@ export default function Sidebar() {
 
   return (
     <aside style={s.sidebar}>
-      {/* Brand */}
       <div style={s.brand}>
         <div style={s.logo}>
           <svg width="16" height="16" viewBox="0 0 28 28" fill="none">
@@ -68,11 +94,10 @@ export default function Sidebar() {
         <span style={s.brandName}>DocAssist</span>
       </div>
 
-      {/* Navigation */}
       <nav style={s.nav}>
         <div style={s.navSection}>
           <div style={s.navSectionLabel}>Main Menu</div>
-          {NAV.map((item) => {
+          {navItems.map((item) => {
             const active = pathname === item.path;
             const iconColor = active ? "#60a5fa" : "#64748b";
             return (
@@ -92,13 +117,12 @@ export default function Sidebar() {
 
       <div style={{ flex: 1 }} />
 
-      {/* User + Logout */}
       <div style={s.bottom}>
         <div style={s.userRow}>
           <div style={s.avatar}>{(user?.full_name || "U")[0].toUpperCase()}</div>
           <div style={s.userInfo}>
             <div style={s.userName}>{user?.full_name || "User"}</div>
-            <div style={s.userRole}>Member</div>
+            <div style={s.userRole}>{roleLabel}</div>
           </div>
         </div>
         <button style={s.logoutBtn} onClick={handleLogout}>
