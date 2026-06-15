@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # Legacy alias kept so existing code using OLLAMA_LLM_MODEL still works
     OLLAMA_LLM_MODEL:      str = "qwen2.5:7b"
 
+    # ── Celery / Redis ────────────────────────────────────────────────────────
+    REDIS_URL: str = "redis://localhost:6379/0"
+
     # ── CORS ──────────────────────────────────────────────────────────────────
     FRONTEND_URL: str = "http://localhost:5173"
     CORS_ORIGINS: str = ""   # optional extra origins, comma-separated

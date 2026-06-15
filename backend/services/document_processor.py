@@ -136,10 +136,12 @@ class DocumentProcessor:
                     document_id, chunk_dicts, batch_size=20
                 )
 
-                for c in db_chunks:
-                    c.is_embedded  = True
-                    c.embedding_id = f"doc{document_id}_chunk{c.chunk_index}"
-                db.commit()
+                _COMMIT_BATCH = 50
+                for i in range(0, len(db_chunks), _COMMIT_BATCH):
+                    for c in db_chunks[i:i + _COMMIT_BATCH]:
+                        c.is_embedded  = True
+                        c.embedding_id = f"doc{document_id}_chunk{c.chunk_index}"
+                    db.commit()
 
                 doc.embedded_chunk_count = success
                 doc.failed_embed_count   = failed
@@ -158,9 +160,24 @@ class DocumentProcessor:
 
         except Exception as e:
             logger.error(f"[Pipeline] ❌ Doc {document_id} failed: {e}", exc_info=True)
-            doc.status        = "failed"
-            doc.error_message = str(e)[:500]
-            db.commit()
+            try:
+                db.rollback()
+                doc.status        = "failed"
+                doc.error_message = str(e)[:500]
+                db.commit()
+            except Exception:
+                # Connection is dead — reopen a fresh session just to mark failure
+                try:
+                    from db.database import SessionLocal
+                    fresh = SessionLocal()
+                    fresh_doc = fresh.query(Document).filter(Document.id == document_id).first()
+                    if fresh_doc:
+                        fresh_doc.status        = "failed"
+                        fresh_doc.error_message = str(e)[:500]
+                        fresh.commit()
+                    fresh.close()
+                except Exception as inner:
+                    logger.error(f"[Pipeline] Could not mark doc {document_id} as failed: {inner}")
             raise
 
     def _build_response(self, doc, db_chunks: list, ocr_result) -> dict:

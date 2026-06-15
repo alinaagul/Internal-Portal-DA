@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from fastapi import (
     APIRouter, Depends, HTTPException, UploadFile,
-    File, BackgroundTasks, Query, status,
+    File, Query, status,
 )
 from sqlalchemy.orm import Session
 
@@ -19,8 +19,8 @@ from model.document_schemas import (
     DocumentListResponse,
     ChunkDetailResponse,
 )
-from services.document_processor import document_processor
 from services.embedding_service import embedding_service
+from celery_app.tasks import process_document
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -40,7 +40,6 @@ MAX_FILE_SIZE  = 200 * 1024 * 1024
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def upload_document(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -83,8 +82,8 @@ async def upload_document(
 
     logger.info(f"[Upload] Doc {doc.id} saved — {file.filename} ({len(contents)//1024} KB)")
 
-    # Kick off background processing (non-blocking)
-    background_tasks.add_task(_run_pipeline, doc.id, str(file_path))
+    # Dispatch to Celery worker (non-blocking)
+    process_document.delay(doc.id, str(file_path))
 
     return DocumentUploadResponse(
         id                = doc.id,
@@ -93,18 +92,6 @@ async def upload_document(
         status            = doc.status,
         message           = "Uploaded. Pipeline started: OCR → Chunking → Embedding.",
     )
-
-
-async def _run_pipeline(document_id: int, file_path: str):
-    """Background task — runs outside the request lifecycle."""
-    from db.database import SessionLocal
-    db = SessionLocal()
-    try:
-        await document_processor.process(document_id, file_path, db)
-    except Exception as e:
-        logger.error(f"[BG] Pipeline failed for doc {document_id}: {e}")
-    finally:
-        db.close()
 
 
 # ── GET /documents/ ───────────────────────────────────────────────────────────

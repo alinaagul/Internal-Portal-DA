@@ -7,6 +7,7 @@ engine = create_engine(
     pool_pre_ping=True,       # verify connection is alive before using
     pool_size=5,
     max_overflow=10,
+    pool_recycle=1800,        # recycle connections every 30 min to avoid TCP drops
     echo=settings.DEBUG,      # log SQL in debug mode
 )
 
@@ -23,7 +24,10 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception:
+            pass
 
 
 def test_connection() -> bool:
