@@ -3,6 +3,8 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
 import { useDocuments } from "../hooks/useDocuments";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 
 const getDocName = (d) => d?.original_filename || d?.filename || "Untitled";
 const getDocShort = (d, max = 30) => {
@@ -10,69 +12,113 @@ const getDocShort = (d, max = 30) => {
   return n.length > max ? n.slice(0, max) + "…" : n;
 };
 
-// Simple markdown renderer — handles bold, bullets, numbered lists, headings
+function renderKatex(latex, displayMode) {
+  try {
+    return katex.renderToString(latex, { displayMode, throwOnError: false, output: "html" });
+  } catch {
+    return latex;
+  }
+}
+
+// Simple markdown renderer — handles bold, bullets, numbered lists, headings, and LaTeX math
 function renderMarkdown(text) {
   if (!text) return null;
-  const lines = text.split("\n");
+
+  // Split text into block-math segments (\[...\] or $$...$$) and everything else
+  const blockMathRe = /(\\\[[\s\S]*?\\\]|\$\$[\s\S]*?\$\$)/g;
+  const segments = text.split(blockMathRe);
+
   const out = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    // Heading
-    const hMatch = line.match(/^(#{1,3})\s+(.+)/);
-    if (hMatch) {
-      const level = hMatch[1].length;
-      const sz = level === 1 ? "16px" : level === 2 ? "14px" : "13px";
+  let keyCounter = 0;
+
+  for (const seg of segments) {
+    // Block math
+    const blockMatch = seg.match(/^\\\[([\s\S]*?)\\\]$/) || seg.match(/^\$\$([\s\S]*?)\$\$$/)
+    if (blockMatch) {
+      const html = renderKatex(blockMatch[1].trim(), true);
       out.push(
-        <div key={i} style={{ fontWeight: "700", fontSize: sz, color: "#0f172a", marginTop: "10px", marginBottom: "4px" }}>
-          {inlineMd(hMatch[2])}
-        </div>
+        <div key={keyCounter++}
+          style={{ overflowX: "auto", margin: "8px 0", textAlign: "center" }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
       );
-      i++; continue;
+      continue;
     }
-    // Bullet
-    const bMatch = line.match(/^[\-\*]\s+(.*)/);
-    if (bMatch) {
-      out.push(
-        <div key={i} style={{ display: "flex", gap: "6px", marginBottom: "3px" }}>
-          <span style={{ color: "#2563eb", flexShrink: 0, marginTop: "1px" }}>•</span>
-          <span>{inlineMd(bMatch[1])}</span>
-        </div>
-      );
-      i++; continue;
+
+    // Process remaining text line by line
+    const lines = seg.split("\n");
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const k = keyCounter++;
+      // Heading
+      const hMatch = line.match(/^(#{1,3})\s+(.+)/);
+      if (hMatch) {
+        const level = hMatch[1].length;
+        const sz = level === 1 ? "16px" : level === 2 ? "14px" : "13px";
+        out.push(
+          <div key={k} style={{ fontWeight: "700", fontSize: sz, color: "#0f172a", marginTop: "10px", marginBottom: "4px" }}>
+            {inlineMd(hMatch[2])}
+          </div>
+        );
+        i++; continue;
+      }
+      // Bullet
+      const bMatch = line.match(/^[\-\*]\s+(.*)/);
+      if (bMatch) {
+        out.push(
+          <div key={k} style={{ display: "flex", gap: "6px", marginBottom: "3px" }}>
+            <span style={{ color: "#2563eb", flexShrink: 0, marginTop: "1px" }}>•</span>
+            <span>{inlineMd(bMatch[1])}</span>
+          </div>
+        );
+        i++; continue;
+      }
+      // Numbered list
+      const nMatch = line.match(/^(\d+)\.\s+(.*)/);
+      if (nMatch) {
+        out.push(
+          <div key={k} style={{ display: "flex", gap: "6px", marginBottom: "3px" }}>
+            <span style={{ color: "#2563eb", flexShrink: 0, fontWeight: "600", minWidth: "16px" }}>{nMatch[1]}.</span>
+            <span>{inlineMd(nMatch[2])}</span>
+          </div>
+        );
+        i++; continue;
+      }
+      // Empty line → spacer
+      if (line.trim() === "") {
+        if (out.length > 0) out.push(<div key={k} style={{ height: "6px" }} />);
+        i++; continue;
+      }
+      // Normal paragraph
+      out.push(<div key={k} style={{ marginBottom: "2px" }}>{inlineMd(line)}</div>);
+      i++;
     }
-    // Numbered list
-    const nMatch = line.match(/^(\d+)\.\s+(.*)/);
-    if (nMatch) {
-      out.push(
-        <div key={i} style={{ display: "flex", gap: "6px", marginBottom: "3px" }}>
-          <span style={{ color: "#2563eb", flexShrink: 0, fontWeight: "600", minWidth: "16px" }}>{nMatch[1]}.</span>
-          <span>{inlineMd(nMatch[2])}</span>
-        </div>
-      );
-      i++; continue;
-    }
-    // Empty line → spacer
-    if (line.trim() === "") {
-      if (out.length > 0) out.push(<div key={i} style={{ height: "6px" }} />);
-      i++; continue;
-    }
-    // Normal paragraph
-    out.push(<div key={i} style={{ marginBottom: "2px" }}>{inlineMd(line)}</div>);
-    i++;
   }
   return out;
 }
 
 function inlineMd(text) {
-  // Split on **bold** and (SOURCE X, ...) citation patterns
-  const parts = text.split(/(\*\*[^*]+\*\*|\([^)]*SOURCE[^)]*\))/g);
+  // Split on **bold**, (SOURCE ...) citations, and inline math \(...\) or $...$
+  const parts = text.split(/(\*\*[^*]+\*\*|\([^)]*SOURCE[^)]*\)|\\\([\s\S]*?\\\)|\$[^$\n]+?\$)/g);
   return parts.map((part, idx) => {
     if (part.startsWith("**") && part.endsWith("**")) {
       return <strong key={idx} style={{ fontWeight: "700", color: "#0f172a" }}>{part.slice(2, -2)}</strong>;
     }
     if (/^\([^)]*SOURCE[^)]*\)$/.test(part)) {
       return <span key={idx} style={{ color: "#2563eb", fontSize: "11px", fontWeight: "600" }}>{part}</span>;
+    }
+    // Inline math \(...\)
+    const inlineBackslash = part.match(/^\\\(([\s\S]*?)\\\)$/);
+    if (inlineBackslash) {
+      const html = renderKatex(inlineBackslash[1], false);
+      return <span key={idx} dangerouslySetInnerHTML={{ __html: html }} />;
+    }
+    // Inline math $...$
+    const inlineDollar = part.match(/^\$([^$\n]+?)\$$/);
+    if (inlineDollar) {
+      const html = renderKatex(inlineDollar[1], false);
+      return <span key={idx} dangerouslySetInnerHTML={{ __html: html }} />;
     }
     return part;
   });
