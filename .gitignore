@@ -122,3 +122,4 @@ ollama_data/
 
 # Testing
 coverage.xml
+chroma_db
